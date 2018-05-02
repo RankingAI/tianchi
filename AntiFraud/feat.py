@@ -176,7 +176,7 @@ with utils.timer('Fill the missing'):
             DataSet[mod][c].fillna(-1, inplace= True)
             #DataSet[mod][c] = DataSet[mod][c].astype('int32')
         for c in num_cols:
-            DataSet[mod][c].fillna(-1, inplace= True)
+            DataSet[mod][c].fillna(0, inplace= True)
             #DataSet[mod][c] = DataSet[mod][c].astype('float32')
 
 ## CV split

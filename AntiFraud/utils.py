@@ -19,14 +19,25 @@ def timer(name):
 ## metric function
 def weighted_tpr(y, scores):
     ''''''
-    fpr, tpr, thresholds = metrics.roc_curve(y, scores, pos_label=2)
+    fpr, tpr, thresholds = metrics.roc_curve(y, scores, pos_label= 1)
+    # print(fpr[:100])
+    # print(tpr[:100])
+    # print('--------------------------------')
+    # print(fpr[-100:])
+    # print(tpr[-100:])
     metric_map = dict(zip(fpr, tpr))
     wtpr = .0
     for t in config.weighted_tpr:
         if(t in metric_map):
-            wtpr += metric_map[t]
+            wtpr += (config.weighted_tpr[t] * metric_map[t])
             print(t, metric_map[t])
     return wtpr
+
+##
+def recall(y, scores):
+    pred = [1 if(s > 0.5) else 0 for s in scores]
+    return metrics.recall_score(y, pred)
+
 ## data io
 def hdf_saver(data, file, key):
     data.to_hdf(path_or_buf= file, key= key, mode= 'w', complib= 'blosc')
