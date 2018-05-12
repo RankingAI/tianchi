@@ -112,9 +112,11 @@ def _load_data():
     for fold in range(config.KFOLD):
         FoldInputDir = '%s/kfold/%s' % (config.MetaModelInputDir, fold)
         valid = utils.hdf_loader('%s/valid_label.hdf' % FoldInputDir, 'valid_label')
+        #valid = pd.read_csv('%s/valid_label.csv' % FoldInputDir)
         valid['fold'] = fold
         valid_dfs.append(valid)
         if(fold == 0):
+            #TestData = pd.read_csv('%s/test.csv' % FoldInputDir)
             TestData = utils.hdf_loader('%s/test.hdf' % FoldInputDir, 'test')
     TrainData = pd.concat(valid_dfs, axis= 0, ignore_index= True)
 
@@ -130,15 +132,14 @@ def _run_meta_model_dfm():
         clf_str = "dnn"
     strategy = 'meta_%s' % clf_str
     ## loading
-    TrainData, TestData = _load_data()
-    TestData[strategy] = .0
+    with utils.timer('Load data'):
+        TrainData, TestData = _load_data()
+    TestData['score'] = .0
     ## parser
     num_cols = [c for c in TrainData.columns if(c.startswith('num_'))]
-    fd = DataReader.FeatureDictionary(dfTrain=TrainData,
-                                      dfTest=TestData,
-                                      numeric_cols=num_cols,
-                                      ignore_cols=config.IGNORE_COLS)
-    parser = DataReader.DataParser(fd)
+    with utils.timer('Parser'):
+        fd = DataReader.FeatureDictionary(dfTrain= TrainData, dfTest= TestData, numeric_cols=num_cols, ignore_cols=config.IGNORE_COLS)
+        parser = DataReader.DataParser(fd)
     ## local CV
     wtpr_results_cv = np.zeros(config.KFOLD, dtype=float)
     wtpr_results_epoch_train = np.zeros((config.KFOLD, dfm_params["epoch"]), dtype=float)
@@ -160,6 +161,8 @@ def _run_meta_model_dfm():
             FoldData['test'][num_cols] = scaler.transform(np.log1p(FoldData['test'][num_cols].values))
         ## prepare data for DeepFM
         with utils.timer('Prepare data'):
+            #fd = DataReader.FeatureDictionary(dfTrain= pd.concat([FoldData['train'], FoldData['valid']], axis= 0, ignore_index= True), dfTest= FoldData['test'], numeric_cols=num_cols, ignore_cols=config.IGNORE_COLS)
+            #parser = DataReader.DataParser(fd)
             Xi_train, Xv_train, y_train = parser.parse(df= FoldData['train'], has_label= True)
             Xi_valid, Xv_valid, y_valid = parser.parse(df= FoldData['valid'], has_label= True)
             Xi_test, Xv_test, ids = parser.parse(df= FoldData['test'], has_label= False)
@@ -171,7 +174,7 @@ def _run_meta_model_dfm():
             dfm.fit(Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid)
             print('train done.')
             FoldData['valid'][strategy] = dfm.predict(Xi_valid, Xv_valid)
-            wtpr_results_cv[fold] = utils.sum_weighted_tpr(y_valid, FoldData['valid'][strategy])
+            wtpr_results_cv[fold] = utils.sum_weighted_tpr(y_valid, FoldData['valid'][strategy].values)
             FoldData[strategy] = dfm.predict(Xi_test, Xv_test)
             TestData['score'] += FoldData[strategy]
             print('inference done.')

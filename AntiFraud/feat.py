@@ -177,19 +177,22 @@ with utils.timer('Fill the missing'):
             DataSet[mod][c].fillna(-1, inplace= True)
             #DataSet[mod][c] = DataSet[mod][c].astype('int32')
         for c in num_cols:
-            DataSet[mod][c].fillna(-1, inplace= True)
+            DataSet[mod][c].fillna(0, inplace= True)
             #DataSet[mod][c] = DataSet[mod][c].astype('float32')
 
 features = cate_cols.copy()
 features.extend(num_cols)
 ## CV, random split
 with utils.timer('CV'):
-    skf = StratifiedKFold(n_splits= config.KFOLD, random_state= 2018)
+    skf = StratifiedKFold(n_splits= config.KFOLD, random_state= config.RANDOM_SEED)
     for fold, (train_index, test_index) in enumerate(skf.split(DataSet['train'][features], DataSet['train']['label'])):
         FoldOutputDir = '%s/kfold/%s' % (config.FeatOutputDir, fold)
         if(os.path.exists(FoldOutputDir) == False):
             os.makedirs(FoldOutputDir)
         FoldData = DataSet['train'].iloc[test_index].copy()
+        #FoldData[FoldData['label'] != -1][['label'] + features].to_csv('%s/valid_label.csv' % FoldOutputDir, index= False)
+        #FoldData[FoldData['label'] == -1][['label'] + features].to_csv('%s/valid_none_label.csv' % FoldOutputDir, index= False)
+        #DataSet['test'][['id'] + features].to_csv('%s/test.csv' % FoldOutputDir, index= False)
         utils.hdf_saver(
             FoldData[FoldData['label']!= -1][['label'] + features],
             '%s/valid_label.hdf' % FoldOutputDir,

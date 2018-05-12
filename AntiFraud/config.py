@@ -1,7 +1,7 @@
 DataBaseDir = './data'
 FeatOutputDir = '%s/version1/l0' % DataBaseDir
 KFOLD = 5
-RANDOM_SEED =  2018
+RANDOM_SEED = 2018
 
 IGNORE_COLS = ['id', 'label', 'date', 'wno', 'fold']
 NUMERIC_COLS = ['f%s' % i for i in range(82, 87)]
@@ -14,5 +14,5 @@ tpr_factor = {
 }
 
 # for meta models
-MetaModelInputDir = '%s/l0' % DataBaseDir
-MetaModelOutputDir = '%s/l1' % DataBaseDir
+MetaModelInputDir = '%s/version1/l0' % DataBaseDir
+MetaModelOutputDir = '%s/version1/l1' % DataBaseDir
