@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import config
 import utils
+from sklearn.model_selection import StratifiedKFold
 #import dill as pickle
 #import pickle
 
@@ -176,80 +177,92 @@ with utils.timer('Fill the missing'):
             DataSet[mod][c].fillna(-1, inplace= True)
             #DataSet[mod][c] = DataSet[mod][c].astype('int32')
         for c in num_cols:
-            DataSet[mod][c].fillna(0, inplace= True)
+            DataSet[mod][c].fillna(-1, inplace= True)
             #DataSet[mod][c] = DataSet[mod][c].astype('float32')
 
-## CV split
 features = cate_cols.copy()
 features.extend(num_cols)
-with utils.timer('CV split saving'):
-    for fold in range(config.KFOLD):
+## CV, random split
+with utils.timer('CV'):
+    skf = StratifiedKFold(n_splits= config.KFOLD, random_state= 2018)
+    for fold, (train_index, test_index) in enumerate(skf.split(DataSet['train'][features], DataSet['train']['label'])):
         FoldOutputDir = '%s/kfold/%s' % (config.FeatOutputDir, fold)
         if(os.path.exists(FoldOutputDir) == False):
             os.makedirs(FoldOutputDir)
-        train_start_wno, train_end_wno = DataSet['train']['wno'].min(), DataSet['train']['wno'].max()
-        valid_wno = train_end_wno - fold
-        train_end_wno = valid_wno - 2
-        # with open('%s/valid_label.pkl' % FoldOutputDir, 'wb') as f:
-        #     pickle.dump(DataSet['train'][(DataSet['train']['wno'] == valid_wno) & (DataSet['train']['label'] != -1)][['label'] + features], f)
-        # f.close()
-        # with open('%s/valid_none_label.pkl' % FoldOutputDir, 'wb') as f:
-        #     pickle.dump(DataSet['train'][(DataSet['train']['wno'] == valid_wno) & (DataSet['train']['label'] == -1)][['label'] + features], f)
-        # f.close()
-        # with open('%s/train_label.pkl' % FoldOutputDir, 'wb') as f:
-        #     pickle.dump(DataSet['train'][(DataSet['train']['wno'] <= train_end_wno) & (DataSet['train']['label'] != -1)][['label'] + features], f)
-        # f.close()
-        # with open('%s/train_none_label.pkl' % FoldOutputDir, 'wb') as f:
-        #     pickle.dump(DataSet['train'][(DataSet['train']['wno'] <= train_end_wno) & (DataSet['train']['label'] == -1)][['label'] + features], f)
-        # f.close()
+        FoldData = DataSet['train'].iloc[test_index].copy()
         utils.hdf_saver(
-            DataSet['train'][(DataSet['train']['wno'] == valid_wno) & (DataSet['train']['label'] != -1)][['label'] + features],
+            FoldData[FoldData['label']!= -1][['label'] + features],
             '%s/valid_label.hdf' % FoldOutputDir,
             'valid_label'
         )
         utils.hdf_saver(
-            DataSet['train'][(DataSet['train']['wno'] == valid_wno) & (DataSet['train']['label'] == -1)][['label'] + features],
-            '%s/valid_none_label.hdf' % FoldOutputDir,
+            FoldData[FoldData['label'] == -1][['label'] + features],
+            '%s/valid_none_label' % FoldOutputDir,
             'valid_none_label'
         )
         utils.hdf_saver(
-            DataSet['train'][(DataSet['train']['wno'] <= train_end_wno) & (DataSet['train']['label'] != -1)][['label'] + features],
-            '%s/train_label.hdf' % FoldOutputDir,
-            'train_label'
-        )
-        utils.hdf_saver(
-            DataSet['train'][(DataSet['train']['wno'] <= train_end_wno) & (DataSet['train']['label'] == -1)][['label'] + features],
-            '%s/train_none_label.hdf' % FoldOutputDir,
-            'train_none_label'
+            DataSet['test'][['id'] + features],
+            '%s/test.hdf' % FoldOutputDir,
+            'test'
         )
         print('fold %s done.' % fold)
 
-## submit output
-with utils.timer('Submit saving'):
-    SubmitOutputDir = '%s/submit' % (config.FeatOutputDir)
-    if(os.path.exists(SubmitOutputDir) == False):
-        os.makedirs(SubmitOutputDir)
-    # with open('%s/train_label.pkl' % SubmitOutputDir, 'wb') as f:
-    #     pickle.dump(DataSet['train'][DataSet['train']['label'] != -1][['label'] + features], f)
-    # f.close()
-    # with open('%s/train_none_label.pkl' % SubmitOutputDir, 'wb') as f:
-    #     pickle.dump(DataSet['train'][DataSet['train']['label'] == -1][['label'] + features], f)
-    # f.close()
-    # with open('%s/test.pkl' % SubmitOutputDir, 'wb') as f:
-    #     pickle.dump(DataSet['test'][['id'] + features], f)
-    # f.close()
-    utils.hdf_saver(
-        DataSet['train'][DataSet['train']['label'] != -1][['label'] + features],
-        '%s/train_label.hdf' % SubmitOutputDir,
-        'train_label'
-    )
-    utils.hdf_saver(
-        DataSet['train'][DataSet['train']['label'] == -1][['label'] + features],
-        '%s/train_none_label.hdf' % SubmitOutputDir,
-        'train_none_label'
-    )
-    utils.hdf_saver(
-        DataSet['test'][['id'] + features],
-        '%s/test.hdf' % SubmitOutputDir,
-        'test'
-    )
+## CV, split residing with time-series
+# with utils.timer('CV split saving'):
+#     for fold in range(config.KFOLD):
+#         FoldOutputDir = '%s/kfold/%s' % (config.FeatOutputDir, fold)
+#         if(os.path.exists(FoldOutputDir) == False):
+#             os.makedirs(FoldOutputDir)
+#         train_start_wno, train_end_wno = DataSet['train']['wno'].min(), DataSet['train']['wno'].max()
+#         valid_wno = train_end_wno - fold
+#         train_end_wno = valid_wno - 2
+#         utils.hdf_saver(
+#             DataSet['train'][(DataSet['train']['wno'] == valid_wno) & (DataSet['train']['label'] != -1)][['label'] + features],
+#             '%s/valid_label.hdf' % FoldOutputDir,
+#             'valid_label'
+#         )
+#         utils.hdf_saver(
+#             DataSet['train'][(DataSet['train']['wno'] == valid_wno) & (DataSet['train']['label'] == -1)][['label'] + features],
+#             '%s/valid_none_label.hdf' % FoldOutputDir,
+#             'valid_none_label'
+#         )
+#         utils.hdf_saver(
+#             DataSet['train'][(DataSet['train']['wno'] <= train_end_wno) & (DataSet['train']['label'] != -1)][['label'] + features],
+#             '%s/train_label.hdf' % FoldOutputDir,
+#             'train_label'
+#         )
+#         utils.hdf_saver(
+#             DataSet['train'][(DataSet['train']['wno'] <= train_end_wno) & (DataSet['train']['label'] == -1)][['label'] + features],
+#             '%s/train_none_label.hdf' % FoldOutputDir,
+#             'train_none_label'
+#         )
+#         print('fold %s done.' % fold)
+# ## submit output
+# with utils.timer('Submit saving'):
+#     SubmitOutputDir = '%s/submit' % (config.FeatOutputDir)
+#     if(os.path.exists(SubmitOutputDir) == False):
+#         os.makedirs(SubmitOutputDir)
+#     # with open('%s/train_label.pkl' % SubmitOutputDir, 'wb') as f:
+#     #     pickle.dump(DataSet['train'][DataSet['train']['label'] != -1][['label'] + features], f)
+#     # f.close()
+#     # with open('%s/train_none_label.pkl' % SubmitOutputDir, 'wb') as f:
+#     #     pickle.dump(DataSet['train'][DataSet['train']['label'] == -1][['label'] + features], f)
+#     # f.close()
+#     # with open('%s/test.pkl' % SubmitOutputDir, 'wb') as f:
+#     #     pickle.dump(DataSet['test'][['id'] + features], f)
+#     # f.close()
+#     utils.hdf_saver(
+#         DataSet['train'][DataSet['train']['label'] != -1][['label'] + features],
+#         '%s/train_label.hdf' % SubmitOutputDir,
+#         'train_label'
+#     )
+#     utils.hdf_saver(
+#         DataSet['train'][DataSet['train']['label'] == -1][['label'] + features],
+#         '%s/train_none_label.hdf' % SubmitOutputDir,
+#         'train_none_label'
+#     )
+#     utils.hdf_saver(
+#         DataSet['test'][['id'] + features],
+#         '%s/test.hdf' % SubmitOutputDir,
+#         'test'
+#     )
