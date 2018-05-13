@@ -20,11 +20,11 @@ def timer(name):
 ## metric function, sum of weighted TPR
 def sum_weighted_tpr(y, scores):
     ''''''
-    score = .0
-    fpr, tpr, thresholds = metrics.roc_curve(y, scores, pos_label=2)
-    for t in config.tpr_factor:
-        score += config.tpr_factor[t] * tpr[np.where(fpr >= t)][0][0]
-    return score
+    swt = .0
+    fpr, tpr, thresholds = metrics.roc_curve(y, scores, pos_label= 1)
+    for t in config.tpr_factor.keys():
+        swt += config.tpr_factor[t] * tpr[np.where(fpr >= t)[0][0]]
+    return swt
 
 ## data io
 def hdf_saver(data, file, key):
