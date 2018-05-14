@@ -273,7 +273,13 @@ def _run_meta_model_dfm():
         SubmitDir = '%s/submit' % config.MetaModelOutputDir
         if(os.path.exists(SubmitDir) == False):
             os.makedirs(SubmitDir)
-        filename = "%s_%s_Mean%.5f_Std%.5f.csv"%(strategy, datetime.datetime.now().strftime("%Y-%m-%d"), wtpr_results_cv.mean(), wtpr_results_cv.std())
+        #filename = "%s_%s_Mean%.5f_Std%.5f.csv"%(strategy, datetime.datetime.now().strftime("%Y-%m-%d"), wtpr_results_cv.mean(), wtpr_results_cv.std())
+        filename = "%s_Mean%.5f_Std%.5f.csv"%(strategy, wtpr_results_cv.mean(), wtpr_results_cv.std())
+        sub.to_csv('%s/%s' % (SubmitDir, filename), index= False, float_format= '%.8f')
+
+    ## plot
+    with utils.timer("Plotting"):
+        _plot_fig(wtpr_results_epoch_train, wtpr_results_epoch_valid, strategy)
         sub.to_csv('%s/%s' % (SubmitDir, filename), index= False, float_format= '%.8f')
 
     ## plot
