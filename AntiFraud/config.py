@@ -22,3 +22,16 @@ MetaModelOutputDir = '%s/version1/l1' % DataBaseDir
 dfm_params = {
     'batch_norm_decay': 0.995,
 }
+
+# for auto encoder
+ae_params = {
+    'encoder_layers': [100],
+    'epochs': 10,
+    'batch_size': 256,
+    'display_step': 1,
+    'learning_rate': 0.0001,
+    'random_seed': 2018,
+    'verbose': True,
+    'phase': 'train',
+    'debug': True,
+}
