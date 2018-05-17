@@ -280,11 +280,6 @@ def _run_meta_model_dfm():
     ## plot
     with utils.timer("Plotting"):
         _plot_fig(wtpr_results_epoch_train, wtpr_results_epoch_valid, strategy)
-        sub.to_csv('%s/%s' % (SubmitDir, filename), index= False, float_format= '%.8f')
-
-    ## plot
-    with utils.timer("Plotting"):
-        _plot_fig(wtpr_results_epoch_train, wtpr_results_epoch_valid, strategy)
 
     end = time.time()
     print('\n------------------------------------')

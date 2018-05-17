@@ -1,9 +1,10 @@
 import pandas as pd
-import time
+import time, os
 from contextlib import contextmanager
 from sklearn import metrics
 import numpy as np
 import config
+from matplotlib import pyplot as plt
 
 ## timer function
 @contextmanager
@@ -32,3 +33,23 @@ def hdf_saver(data, file, key):
 
 def hdf_loader(file, key):
     return pd.read_hdf(path_or_buf= file, key= key)
+
+
+def plot_fig(train_results, valid_results, output_dir, model_name):
+    if(os.path.exists(output_dir) == False):
+        os.makedirs(output_dir)
+    colors = ['C%s' % i for i in range(train_results.shape[0])]
+    xs = np.arange(1, train_results.shape[1]+1)
+    plt.figure()
+    legends = []
+    for i in range(train_results.shape[0]):
+        plt.plot(xs, train_results[i], color=colors[i], linestyle="solid", marker="o")
+        plt.plot(xs, valid_results[i], color=colors[i], linestyle="dashed", marker="o")
+        legends.append("train-%d"%(i+1))
+        legends.append("valid-%d"%(i+1))
+    plt.xlabel("Epoch")
+    plt.ylabel("Sum of Weighted TPR")
+    plt.title("%s" % model_name)
+    plt.legend(legends)
+    plt.savefig("%s/%s.png" % (output_dir, model_name))
+    plt.close()

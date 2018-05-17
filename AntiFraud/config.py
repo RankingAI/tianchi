@@ -35,3 +35,17 @@ ae_params = {
     'phase': 'train',
     'debug': True,
 }
+
+# for dlmcd
+dlmcd_params = {
+    'algo': 'pnn2',
+    'min_round': 1,
+    'num_round': 5,
+    'early_stop_round': 5,
+    'batch_size': 256,
+    'debug': True,
+    'embedding_size': 8,
+    'layer_size': [200, 1],
+    'learning_rate': 0.1,
+    'random_seed': 2018
+}

@@ -40,6 +40,7 @@ class Model:
                     feed_dict[self.layer_keeps] = self.keep_prob_train
                 elif mode == 'test':
                     feed_dict[self.layer_keeps] = self.keep_prob_test
+            print(feed_dict)
             return self.sess.run(fetches, feed_dict)
 
     def dump(self, model_path):
