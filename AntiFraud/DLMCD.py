@@ -28,6 +28,8 @@ class Model:
 
     def run(self, fetches, X=None, y=None, mode='train'):
             feed_dict = {}
+            print(len(X))
+            print(len(self.X))
             if type(self.X) is list:
                 for i in range(len(X)):
                     feed_dict[self.X[i]] = X[i]

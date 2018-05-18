@@ -143,16 +143,12 @@ for fold in range(config.KFOLD):
         fd = DLMCDDataReader.FeatureDictionary(dfTrain= train_data[cate_cols], dfTest= test_data[cate_cols],ignore_cols=config.IGNORE_COLS)
         parser = DLMCDDataReader.DataParser(fd)
     _print_memory_usage()
-    ##
-    #valid_data = train_data[train_data['fold'] == fold]
-    #train_data = train_data[train_data['fold'] != fold]
     ## transform
     with utils.timer('Transformer'):
         Xi_train, Xv_train, y_train = parser.parse(df= train_data[train_data['fold'] != fold][['label'] + cate_cols], has_label= True)
         Xi_valid, Xv_valid, y_valid = parser.parse(df= train_data[train_data['fold'] == fold][['label'] + cate_cols], has_label= True)
         label_valid = y_valid.copy()
-        #y_train = np.reshape(np.array(y_train), [-1])
-        y_train = np.array(y_train).reshape(-1)
+        y_train = np.reshape(np.array(y_train), [-1])
         y_valid = np.reshape(np.array(y_valid), [-1])
         del train_data
         gc.collect()
@@ -163,9 +159,11 @@ for fold in range(config.KFOLD):
         gc.collect()
     train_size = train_data[0].shape[0]
     valid_size = valid_data[0].shape[0]
-    print(train_data[0].shape)
-    print(valid_data[0].shape)
     print('train size %s, valid size %s' % (train_size, valid_size))
+    ## split by fields, do not forget about it
+    with utils.timer('Splitting'):
+        train_data = dlmcd_utils.split_data(train_data, fd.field_offset)
+        valid_data = dlmcd_utils.split_data(valid_data, fd.field_offset)
     ## modelling
     model = _get_model(config.dlmcd_params['algo'])
     for i in range(config.dlmcd_params['num_round']):
@@ -177,7 +175,6 @@ for fold in range(config.KFOLD):
                 bar = progressbar.ProgressBar()
                 for j in bar(range(int(train_size / config.dlmcd_params['batch_size'] + 1))):
                     X_i, y_i = dlmcd_utils.slice(train_data, j * config.dlmcd_params['batch_size'], config.dlmcd_params['batch_size'])
-
                     _, l = model.run(fetches, X_i, y_i)
                     ls.append(l)
             elif config.dlmcd_params['batch_size'] == -1:
@@ -210,6 +207,7 @@ for fold in range(config.KFOLD):
     with utils.timer('Inference'):
         Xi_test, Xv_test, ids = parser.parse(df= test_data[['id'] + cate_cols], has_label= False)
         test_data = dlmcd_utils.libsvm_2_coo(zip(Xi_test, Xv_test), (len(Xi_test), fd.feat_dim)).tocsr(), ids
+        test_data = dlmcd_utils.split_data(test_data, fd.field_offset) # do not forget about this
         test_size = len(test_data)
         bar = progressbar.ProgressBar()
         for j in bar(range(int((test_size / config.dlmcd_params['batch_size']) + 1))):

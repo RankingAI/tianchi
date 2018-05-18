@@ -45,7 +45,7 @@ dlmcd_params = {
     'batch_size': 256,
     'debug': True,
     'embedding_size': 8,
-    'layer_size': [200, 1],
+    'layer_size': [20, 1],
     'learning_rate': 0.1,
     'random_seed': 2018
 }
