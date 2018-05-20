@@ -16,7 +16,7 @@ def timer(name):
     """
     t0 = time.time()
     yield
-    print(f'[{name}] done in {time.time() - t0:.0f} s')
+    print(f'\n[{name}] done in {time.time() - t0:.0f} s')
 
 ## metric function, sum of weighted TPR
 def sum_weighted_tpr(y, scores):

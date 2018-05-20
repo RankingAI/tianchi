@@ -37,15 +37,41 @@ ae_params = {
 }
 
 # for dlmcd
+dlmcd_algo = 'lr'
 dlmcd_params = {
-    'algo': 'pnn2',
-    'min_round': 1,
-    'num_round': 5,
-    'early_stop_round': 5,
-    'batch_size': 256,
-    'debug': True,
-    'embedding_size': 8,
-    'layer_size': [20, 1],
-    'learning_rate': 0.1,
-    'random_seed': 2018
+    'pnn2':
+        {
+            'min_round': 1,
+            'num_round': 10,
+            'early_stop_round': 5,
+            'batch_size': 256,
+            'embedding_size': 8,
+            'layer_size': [200, 1],
+            'learning_rate': 0.1,
+            'random_seed': 2018,
+            'debug': True,
+        },
+    'fnn':
+        {
+            'min_round': 1,
+            'num_round': 7,
+            'early_stop_round': 5,
+            'batch_size': 256,
+            'embedding_size': 8,
+            'layer_size': [200, 1],
+            'learning_rate': 0.1,
+            'random_seed': 2018,
+            'debug': False,
+        },
+    'lr':
+        {
+            'min_round': 1,
+            'num_round': 10,
+            'early_stop_round': 5,
+            'batch_size': 256,
+            'learning_rate': 0.1,
+            'l2_weight': 1.0,
+            'random_seed': 2018,
+            'debug': False,
+        }
 }

@@ -18,7 +18,7 @@ if(not p in sys.path):
 process = psutil.Process(os.getpid())
 tf.set_random_seed(config.RANDOM_SEED)
 pd.set_option('display.max_rows', None)
-strategy = 'dlmcd_%s' % config.dlmcd_params['algo']
+strategy = 'meta_dlmcd_%s' % config.dlmcd_algo
 
 def _print_memory_usage():
     ''''''
@@ -29,15 +29,17 @@ def _load_data():
     valid_dfs = []
     for fold in range(config.KFOLD):
         FoldInputDir = '%s/kfold/%s' % (config.MetaModelInputDir, fold)
-        if(config.dlmcd_params['debug'] == True):
-            sample_frac = 0.05
+        if(config.dlmcd_params[config.dlmcd_algo]['debug'] == True):
+            sample_frac = 0.1
         else:
             sample_frac = 1.
-        valid = utils.hdf_loader('%s/valid_label.hdf' % FoldInputDir, 'valid_label').sample(frac= sample_frac).reset_index(drop= True)
+        valid = utils.hdf_loader('%s/valid_label.hdf' % FoldInputDir, 'valid_label').reset_index(drop= True)
+        valid = valid.loc[:int(sample_frac * len(valid)),]
         valid['fold'] = fold
         valid_dfs.append(valid)
         if(fold == 0):
-            TestData = utils.hdf_loader('%s/test.hdf' % FoldInputDir, 'test').sample(frac= sample_frac).reset_index(drop= True)
+            TestData = utils.hdf_loader('%s/test.hdf' % FoldInputDir, 'test').reset_index(drop= True)
+            TestData = TestData.loc[:int(sample_frac * len(TestData)),]
     TrainData = pd.concat(valid_dfs, axis= 0, ignore_index= True)
     return TrainData, TestData
 
@@ -46,9 +48,9 @@ def _get_model(algo):
         lr_params = {
             'input_dim': fd.feat_dim,
             'opt_algo': 'gd',
-            'learning_rate': 0.1,
-            'l2_weight': 0,
-            'random_seed': 0
+            'learning_rate': config.dlmcd_params[config.dlmcd_algo]['learning_rate'],
+            'l2_weight': config.dlmcd_params[config.dlmcd_algo]['l2_weight'],
+            'random_seed': config.dlmcd_params[config.dlmcd_algo]['random_seed']
         }
         print(lr_params)
         model = LR(**lr_params)
@@ -66,17 +68,16 @@ def _get_model(algo):
     elif algo == 'fnn':
         fnn_params = {
             'field_sizes': fd.field_size,
-            'embed_size': 10,
-            'layer_sizes': [500, 1],
+            'embed_size': config.dlmcd_params[config.dlmcd_algo]['embedding_size'],
+            'layer_sizes': config.dlmcd_params[config.dlmcd_algo]['layer_size'],
             'layer_acts': ['relu', None],
             'drop_out': [0, 0],
             'opt_algo': 'gd',
-            'learning_rate': 0.1,
+            'learning_rate': config.dlmcd_params[config.dlmcd_algo]['learning_rate'],
             'embed_l2': 0,
             'layer_l2': [0, 0],
-            'random_seed': 0
+            'random_seed': config.dlmcd_params[config.dlmcd_algo]['random_seed']
         }
-        print(fnn_params)
         model = FNN(**fnn_params)
     elif algo == 'ccpm':
         ccpm_params = {
@@ -109,15 +110,15 @@ def _get_model(algo):
     elif algo == 'pnn2':
         pnn2_params = {
             'field_sizes': fd.field_size,
-            'embed_size': config.dlmcd_params['embedding_size'],
-            'layer_sizes': config.dlmcd_params['layer_size'],
+            'embed_size': config.dlmcd_params[config.dlmcd_algo]['embedding_size'],
+            'layer_sizes': config.dlmcd_params[config.dlmcd_algo]['layer_size'],
             'layer_acts': ['relu', None],
             'drop_out': [0, 0],
             'opt_algo': 'gd',
-            'learning_rate': config.dlmcd_params['learning_rate'],
+            'learning_rate': config.dlmcd_params[config.dlmcd_algo]['learning_rate'],
             'embed_l2': 0,
             'layer_l2': [0., 0.],
-            'random_seed': config.dlmcd_params['random_seed'],
+            'random_seed': config.dlmcd_params[config.dlmcd_algo]['random_seed'],
             'layer_norm': True,
         }
         model = PNN2(**pnn2_params)
@@ -126,8 +127,8 @@ def _get_model(algo):
 ## local CV
 start = time.time()
 wtpr_results_cv = np.zeros(config.KFOLD, dtype=float)
-wtpr_results_epoch_train = np.zeros((config.KFOLD, config.dlmcd_params['num_round']), dtype=float)
-wtpr_results_epoch_valid = np.zeros((config.KFOLD, config.dlmcd_params['num_round']), dtype=float)
+wtpr_results_epoch_train = np.zeros((config.KFOLD, config.dlmcd_params[config.dlmcd_algo]['num_round']), dtype=float)
+wtpr_results_epoch_valid = np.zeros((config.KFOLD, config.dlmcd_params[config.dlmcd_algo]['num_round']), dtype=float)
 sub = pd.DataFrame(columns= ['id', 'score'])
 for fold in range(config.KFOLD):
     pred_valid = []
@@ -147,7 +148,7 @@ for fold in range(config.KFOLD):
     with utils.timer('Transformer'):
         Xi_train, Xv_train, y_train = parser.parse(df= train_data[train_data['fold'] != fold][['label'] + cate_cols], has_label= True)
         Xi_valid, Xv_valid, y_valid = parser.parse(df= train_data[train_data['fold'] == fold][['label'] + cate_cols], has_label= True)
-        label_valid = y_valid.copy()
+        #label_valid = y_valid.copy()
         y_train = np.reshape(np.array(y_train), [-1])
         y_valid = np.reshape(np.array(y_valid), [-1])
         del train_data
@@ -165,19 +166,19 @@ for fold in range(config.KFOLD):
         train_data = dlmcd_utils.split_data(train_data, fd.field_offset)
         valid_data = dlmcd_utils.split_data(valid_data, fd.field_offset)
     ## modelling
-    model = _get_model(config.dlmcd_params['algo'])
-    for i in range(config.dlmcd_params['num_round']):
+    model = _get_model(config.dlmcd_algo)
+    for i in range(config.dlmcd_params[config.dlmcd_algo]['num_round']):
         # train
         fetches = [model.optimizer, model.loss]
         with utils.timer('Train'):
-            if config.dlmcd_params['batch_size'] > 0:
+            if config.dlmcd_params[config.dlmcd_algo]['batch_size'] > 0:
                 ls = []
                 bar = progressbar.ProgressBar()
-                for j in bar(range(int(train_size / config.dlmcd_params['batch_size'] + 1))):
-                    X_i, y_i = dlmcd_utils.slice(train_data, j * config.dlmcd_params['batch_size'], config.dlmcd_params['batch_size'])
+                for j in bar(range(int(train_size / config.dlmcd_params[config.dlmcd_algo]['batch_size'] + 1))):
+                    X_i, y_i = dlmcd_utils.slice(train_data, j * config.dlmcd_params[config.dlmcd_algo]['batch_size'], config.dlmcd_params[config.dlmcd_algo]['batch_size'])
                     _, l = model.run(fetches, X_i, y_i)
                     ls.append(l)
-            elif config.dlmcd_params['batch_size'] == -1:
+            elif config.dlmcd_params[config.dlmcd_algo]['batch_size'] == -1:
                 X_i, y_i = dlmcd_utils.slice(train_data)
                 _, l = model.run(fetches, X_i, y_i)
                 ls = [l]
@@ -187,32 +188,35 @@ for fold in range(config.KFOLD):
             train_preds = []
             valid_preds = []
             bar = progressbar.ProgressBar()
-            for j in bar(range(int((train_size / config.dlmcd_params['batch_size']) + 1))):
-                X_i, _ = dlmcd_utils.slice(train_data, j * config.dlmcd_params['batch_size'], config.dlmcd_params['batch_size'])
+            for j in bar(range(int((train_size / config.dlmcd_params[config.dlmcd_algo]['batch_size']) + 1))):
+                X_i, _ = dlmcd_utils.slice(train_data, j * config.dlmcd_params[config.dlmcd_algo]['batch_size'], config.dlmcd_params[config.dlmcd_algo]['batch_size'])
                 preds = model.run(model.y_prob, X_i, mode='test')
                 train_preds.extend(preds)
             _print_memory_usage()
             bar = progressbar.ProgressBar()
-            for j in bar(range(int((valid_size / config.dlmcd_params['batch_size']) + 1))):
-                X_i, _ = dlmcd_utils.slice(valid_data, j * config.dlmcd_params['batch_size'], config.dlmcd_params['batch_size'])
+            for j in bar(range(int((valid_size / config.dlmcd_params[config.dlmcd_algo]['batch_size']) + 1))):
+                X_i, _ = dlmcd_utils.slice(valid_data, j * config.dlmcd_params[config.dlmcd_algo]['batch_size'], config.dlmcd_params[config.dlmcd_algo]['batch_size'])
                 preds = model.run(model.y_prob, X_i, mode='test')
                 valid_preds.extend(preds)
             wtpr_results_epoch_train[fold][i] = utils.sum_weighted_tpr(train_data[1], train_preds)
             wtpr_results_epoch_valid[fold][i] = utils.sum_weighted_tpr(valid_data[1], valid_preds)
-            if(i == (config.dlmcd_params['num_round'] - 1)):
+            if(i == (config.dlmcd_params[config.dlmcd_algo]['num_round'] - 1)):
                 pred_valid = valid_preds.copy()
+                label_valid = valid_data[1].copy()
         _print_memory_usage()
         print('[round %d]: loss (with l2 norm) %.6f, train score %.6f, valid score %.6f' % (i, np.mean(ls), wtpr_results_epoch_train[fold][i], wtpr_results_epoch_valid[fold][i]))
     ## predict on test
     with utils.timer('Inference'):
         Xi_test, Xv_test, ids = parser.parse(df= test_data[['id'] + cate_cols], has_label= False)
         test_data = dlmcd_utils.libsvm_2_coo(zip(Xi_test, Xv_test), (len(Xi_test), fd.feat_dim)).tocsr(), ids
+        test_size = test_data[0].shape[0]
         test_data = dlmcd_utils.split_data(test_data, fd.field_offset) # do not forget about this
-        test_size = len(test_data)
+        print('test size %s, batches on test data %s' % (test_size, int((test_size / config.dlmcd_params[config.dlmcd_algo]['batch_size']) + 1)))
         bar = progressbar.ProgressBar()
-        for j in bar(range(int((test_size / config.dlmcd_params['batch_size']) + 1))):
-            X_i, _ = dlmcd_utils.slice(test_data, j * config.dlmcd_params['batch_size'], config.dlmcd_params['batch_size'])
-            pred_test.extends(model.run(model.y_prob, X_i, mode='test'))
+        for j in bar(range(int((test_size / config.dlmcd_params[config.dlmcd_algo]['batch_size']) + 1))):
+            X_i, _ = dlmcd_utils.slice(test_data, j * config.dlmcd_params[config.dlmcd_algo]['batch_size'], config.dlmcd_params[config.dlmcd_algo]['batch_size'])
+            pred = model.run(model.y_prob, X_i, mode='test')
+            pred_test.extend(pred)
     ## saving
     with utils.timer('Saving'):
         FoldOutputDir = '%s/kfold/%s' % (config.MetaModelOutputDir, fold)
@@ -220,20 +224,26 @@ for fold in range(config.KFOLD):
             os.makedirs(FoldOutputDir)
         valid_k = 'valid_label_%s' % strategy
         out_valid = pd.DataFrame()
+        assert(len(label_valid) == len(pred_valid))
         out_valid['label'] = label_valid
         out_valid[strategy] = pred_valid
         out_valid.to_csv('%s/%s.csv' % (FoldOutputDir, valid_k), index=False, float_format='%.8f')
         print('Saving for valid done.')
         test_k = 'test_%s' % strategy
         out_test = pd.DataFrame()
+        assert(len(ids) == len(pred_test))
         out_test['id'] = ids
         out_test[strategy] = pred_test
         out_test.to_csv('%s/%s.csv' % (FoldOutputDir, test_k), index=False, float_format='%.8f')
         print('Saving for test done.')
+        if(fold == 0):
+            sub['id'] = ids
+            sub['score'] = .0
+        sub['score'] += pred_test
 
     wtpr_results_cv[fold] = wtpr_results_epoch_valid[fold][-1]
     print('\n=================================')
-    print('Fold %s, weighted tpr %.6f' % wtpr_results_cv[fold])
+    print('Fold %s, weighted tpr %.6f' % (fold, wtpr_results_cv[fold]))
     print('=================================\n')
 
 _print_memory_usage()

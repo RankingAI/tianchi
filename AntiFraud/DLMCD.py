@@ -28,8 +28,6 @@ class Model:
 
     def run(self, fetches, X=None, y=None, mode='train'):
             feed_dict = {}
-            print(len(X))
-            print(len(self.X))
             if type(self.X) is list:
                 for i in range(len(X)):
                     feed_dict[self.X[i]] = X[i]
@@ -42,7 +40,6 @@ class Model:
                     feed_dict[self.layer_keeps] = self.keep_prob_train
                 elif mode == 'test':
                     feed_dict[self.layer_keeps] = self.keep_prob_test
-            print(feed_dict)
             return self.sess.run(fetches, feed_dict)
 
     def dump(self, model_path):
