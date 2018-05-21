@@ -1,5 +1,6 @@
-DataBaseDir = './data'
-FeatOutputDir = '%s/version1/l0' % DataBaseDir
+DataRootDir = './data'
+DataBaseDir = './data/version1'
+FeatOutputDir = '%s/l0' % DataBaseDir
 KFOLD = 5
 RANDOM_SEED = 2018
 
@@ -15,14 +16,12 @@ tpr_factor = {
 }
 
 # for meta models
-MetaModelInputDir = '%s/version1/l0' % DataBaseDir
-MetaModelOutputDir = '%s/version1/l1' % DataBaseDir
-
+MetaModelInputDir = '%s/l0' % DataBaseDir
+MetaModelOutputDir = '%s/l1' % DataBaseDir
 # for dfm
 dfm_params = {
     'batch_norm_decay': 0.995,
 }
-
 # for auto encoder
 ae_params = {
     'encoder_layers': [100],
@@ -35,7 +34,6 @@ ae_params = {
     'phase': 'train',
     'debug': True,
 }
-
 # for dlmcd
 dlmcd_algo = 'lr'
 dlmcd_params = {
@@ -75,3 +73,4 @@ dlmcd_params = {
             'debug': False,
         }
 }
+

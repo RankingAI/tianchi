@@ -57,11 +57,11 @@ cal_dtypes = {
 dateparse = lambda x: pd.datetime.strptime(x, '%Y%m%d')
 with utils.timer('Load data'):
     DataSet = {
-                'train': pd.read_csv('%s/raw/atec_anti_fraud_train.csv' % config.DataBaseDir, parse_dates= ['date'],
+                'train': pd.read_csv('%s/raw/atec_anti_fraud_train.csv' % config.DataRootDir, parse_dates= ['date'],
                                      date_parser= dateparse),
-                'test': pd.read_csv('%s/raw/atec_anti_fraud_test_a.csv' % config.DataBaseDir, parse_dates= ['date'],
+                'test': pd.read_csv('%s/raw/atec_anti_fraud_test_a.csv' % config.DataRootDir, parse_dates= ['date'],
                                     date_parser= dateparse),
-        'calendar': pd.read_csv('%s/raw/calendar.csv' % config.DataBaseDir, parse_dates=['date'],
+        'calendar': pd.read_csv('%s/raw/calendar.csv' % config.DataRootDir, parse_dates=['date'],
                                 date_parser=dateparse, dtype=cal_dtypes)
     }
     for mod in ['calendar', 'train', 'test']:
