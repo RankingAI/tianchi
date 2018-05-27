@@ -115,8 +115,8 @@ def _run_meta_model_aenn():
         cols_std = []
         for c in range(X_train.shape[1]):
             if(c < sep_idx):
-                X_train[:, c] = np.log1p(X_train[:, c])
-                X_valid[:, c] = np.log1p(X_valid[:, c])
+                X_train[:, c] = (X_train[:, c])
+                X_valid[:, c] = (X_valid[:, c])
             cols_mean.append(X_train[:, c].mean())
             cols_std.append(X_train[:, c].std())
             X_train[:, c] = (X_train[:, c] - cols_mean[-1]) / cols_std[-1]

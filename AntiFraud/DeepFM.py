@@ -135,6 +135,8 @@ class DeepFM(BaseEstimator, TransformerMixin):
                     for i in range(len(self.deep_layers)):
                         self.loss += tf.contrib.layers.l2_regularizer(
                             self.l2_reg)(self.weights["layer_%d"%i])
+            # sample weight
+            #self.loss = tf.multiply(self.loss, tf.multiply(self.label, 19))
 
             # optimizer
             if self.optimizer_type == "adam":
