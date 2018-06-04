@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 
 strategy = 'l1_lr'
-meta_strategies = ['meta_deepfm', 'meta_dlmcd_fnn']
+meta_strategies = ['meta_deepfm', 'meta_dlmcd_fnn']#, 'meta_dlmcd_pnn2']
 InputDir = config.MetaModelOutputDir
 OutputDir = '%s/l2' % config.DataBaseDir
 valid_dfs = []

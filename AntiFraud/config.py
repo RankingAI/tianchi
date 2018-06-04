@@ -4,8 +4,8 @@ FeatOutputDir = '%s/l0' % DataBaseDir
 KFOLD = 5
 RANDOM_SEED = 2018
 
-IGNORE_COLS = ['id', 'label', 'date', 'wno', 'fold', 'num_is_festival', 'num_festival_is_holiday',
-               'num_china_day_of_month']
+IGNORE_COLS = ['id', 'label', 'date', 'wno', 'fold', 'cate_is_festival', 'cate_festival_is_holiday',
+               'cate_china_day_of_month']
 NUMERIC_COLS = ['f%s' % i for i in range(82, 87)]
 CATEGORICAL_COLS = ['f%s' % i for i in range(1, 298) if(i not in range(82, 87))]
 
@@ -24,7 +24,7 @@ dfm_params = {
 }
 # for auto encoder
 ae_params = {
-    'encoder_layers': [100],
+    'encoder_layers': [50, 50],
     'epochs': 10,
     'batch_size': 256,
     'display_step': 1,
