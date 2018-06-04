@@ -74,3 +74,9 @@ dlmcd_params = {
         }
 }
 
+# for lgb
+lgb_params = {
+    'epoch': 100,
+    'debug': False,
+}
+
