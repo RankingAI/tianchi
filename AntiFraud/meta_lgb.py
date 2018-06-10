@@ -16,7 +16,7 @@ params = {
     "lambda_l2": 2,  # !!!
     'metric': 'auc',
 
-    "num_iterations": 100,
+    "num_iterations": config.lgb_params['epoch'],
     "learning_rate": 0.05,  # !!!
     "max_depth": 8,  # !!!
     'scale_pos_weight': 9,
@@ -45,21 +45,17 @@ def _load_data():
     valid_dfs = []
     for fold in range(config.KFOLD):
         FoldInputDir = '%s/kfold/%s' % (config.MetaModelInputDir, fold)
+        valid = utils.hdf_loader('%s/valid_label.hdf' % FoldInputDir, 'valid_label').reset_index(drop= True)
         if(config.lgb_params['debug'] == True):
-            valid = utils.hdf_loader('%s/valid_label.hdf' % FoldInputDir, 'valid_label').reset_index(drop=True)
             idx_list = [v for v in valid.index.values if((v % 10) == 0)]
             valid = valid.iloc[idx_list, :]
-        else:
-            valid = utils.hdf_loader('%s/valid_label.hdf' % FoldInputDir, 'valid_label').reset_index(drop= True)
         valid['fold'] = fold
         valid_dfs.append(valid)
         if(fold == 0):
+            TestData = utils.hdf_loader('%s/test.hdf' % FoldInputDir, 'test').reset_index(drop= True)
             if(config.lgb_params['debug'] == True):
-                TestData = utils.hdf_loader('%s/test.hdf' % FoldInputDir, 'test').reset_index(drop= True)
                 idx_list = [v for v in TestData.index.values if((v % 10) == 0)]
                 TestData = TestData.iloc[idx_list, :]
-            else:
-                TestData = utils.hdf_loader('%s/test.hdf' % FoldInputDir, 'test').reset_index(drop= True)
     TrainData = pd.concat(valid_dfs, axis= 0, ignore_index= True)
 
     return TrainData, TestData
