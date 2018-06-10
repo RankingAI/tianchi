@@ -15,7 +15,7 @@ params = {
     "lambda_l2": 2,  # !!!
     #'metric': 'auc',
 
-    "num_iterations": 100,
+    "num_iterations": 200,
     "learning_rate": 0.05,  # !!!
     "max_depth": 8,  # !!!
     'scale_pos_weight': 9,
@@ -143,24 +143,24 @@ num_cols = [c for c in DataSet['train'].columns if(c.startswith('num_'))]
 cate_cols = [c for c in DataSet['train'].columns if(c.startswith('cate_'))]
 date_cols = [c for c in DataSet['train'].columns if(c.startswith('date_'))]
 total_feat_cols = num_cols + cate_cols + date_cols
-## fill the missing
-with utils.timer('Fill the missing'):
-    for mod in ['train', 'test']:
-        for c in cate_cols:
-            DataSet[mod][c].fillna(-1, inplace= True)
-        for c in num_cols:
-            DataSet[mod][c].fillna(0, inplace= True)
+# ## fill the missing
+# with utils.timer('Fill the missing'):
+#     for mod in ['train', 'test']:
+#         for c in cate_cols:
+#             DataSet[mod][c].fillna(-1, inplace= True)
+#         for c in num_cols:
+#             DataSet[mod][c].fillna(0, inplace= True)
 
 with utils.timer('remove the unlabled'):
     for mod in ['train']:
-        DataSet[mod] = DataSet[mod][DataSet[mod]['label'] != -1]
+        DataSet[mod] = DataSet[mod][DataSet[mod]['label'] != -1].reset_index(drop= True)
 
 def evalerror(preds, dtrain):
     labels = dtrain.get_label()
     return 'swt', utils.sum_weighted_tpr(labels, preds), True
 
 kfold = 5
-times = 1
+times = 8
 final_cv_train = np.zeros(len(DataSet['train']))
 final_cv_pred = np.zeros(len(DataSet['test']))
 cv_precision = np.zeros((times, kfold), dtype= np.float)
