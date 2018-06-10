@@ -53,3 +53,39 @@ def plot_fig(train_results, valid_results, output_dir, model_name):
     plt.legend(legends)
     plt.savefig("%s/%s.png" % (output_dir, model_name))
     plt.close()
+
+def TagHoliday(df):
+    ''''''
+    n = len(df)
+    result = ['' for x in range(n)]
+    for i in range(n):
+        if (i == 0):
+            result[i] = 'hid_%s' % 0
+        elif ((df[i] - df[i - 1]).days == 1):
+            result[i] = result[i - 1]
+        else:
+            result[i] = 'hid_%s' % (int(result[i - 1].split('_')[1]) + 1)
+    return result
+
+def IsTheLast(tags):
+    n = len(tags)
+    result = []
+    for i in range(n - 1):
+        if (tags[i] == tags[i + 1]):
+            result.append(0)
+        else:
+            result.append(1)
+    result.append(1)
+    return result
+
+def IsTheFirst(tags):
+    n = len(tags)
+    result = []
+    for i in range(n):
+        if (i == 0):
+            result.append(1)
+        elif (tags[i] != tags[i - 1]):
+            result.append(1)
+        else:
+            result.append(0)
+    return result
