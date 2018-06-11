@@ -9,28 +9,53 @@ import lightgbm
 sys.path.append("..")
 pd.set_option('display.max_rows', None)
 # parameters
+# params = {
+#     "boosting": "gbdt",
+#     "objective": "binary",
+#     "lambda_l2": 2,  # !!!
+#     #'metric': 'auc',
+#
+#     "num_iterations": 200,
+#     "learning_rate": 0.05,  # !!!
+#     "max_depth": 8,  # !!!
+#     'scale_pos_weight': 9,
+#     #'min_data_in_leaf': 50,
+#     #'num_leaves': 256,
+#     'cat_smooth': 80,
+#     'cat_l2': 20,
+#     #'max_cat_threshold': 64,
+#
+#     "feature_fraction": 0.9,
+#     "bagging_fraction": 0.9,
+#     #"bagging_freq": 20,
+#     #"min_hessian": 0.001,
+#
+#     "max_bin": 63,
+# }
 params = {
     "boosting": "gbdt",
     "objective": "binary",
     "lambda_l2": 2,  # !!!
-    #'metric': 'auc',
 
-    "num_iterations": 200,
-    "learning_rate": 0.05,  # !!!
-    "max_depth": 8,  # !!!
-    'scale_pos_weight': 9,
-    #'min_data_in_leaf': 50,
-    #'num_leaves': 256,
+    "num_iterations": 5000,
+    "learning_rate": 0.1,  # !!!
+    # "max_depth": 8,  # !!!
+    'scale_pos_weight': 5,
+    'min_data_in_leaf': 2000,
+    #'min_child_samples': 50,
+    #'min_child_weight': 150,
+    'min_split_gain': 0,
+    'num_leaves': 31,
     'cat_smooth': 80,
     'cat_l2': 20,
+    'drop_rate': 0.1,
+    'max_drop': 50,
     #'max_cat_threshold': 64,
 
-    "feature_fraction": 0.9,
+    "feature_fraction": 0.6,
     "bagging_fraction": 0.9,
-    #"bagging_freq": 20,
-    #"min_hessian": 0.001,
 
-    "max_bin": 63,
+    "max_bin": 255,
 }
 strategy = 'lgb'
 
@@ -164,14 +189,14 @@ times = 8
 final_cv_train = np.zeros(len(DataSet['train']))
 final_cv_pred = np.zeros(len(DataSet['test']))
 cv_precision = np.zeros((times, kfold), dtype= np.float)
-skf = StratifiedKFold(n_splits= kfold, random_state= 2018, shuffle= True)
+skf = StratifiedKFold(n_splits= kfold, random_state= None, shuffle= True)
 
 x_score = []
 for s in range(times):
     cv_train = np.zeros(len(DataSet['train']))
     cv_pred = np.zeros(len(DataSet['test']))
 
-    params['seed'] = s
+    params['seed'] = 2018
 
     kf = skf.split(DataSet['train'][total_feat_cols], DataSet['train']['label'])
 
@@ -182,9 +207,9 @@ for s in range(times):
         for fold, (train_index, valid_index) in enumerate(kf):
             X_train, X_valid = DataSet['train'][total_feat_cols].iloc[train_index,], DataSet['train'][total_feat_cols].iloc[valid_index,]
             y_train, y_valid = DataSet['train']['label'][train_index], DataSet['train']['label'][valid_index]
-            dtrain = lightgbm.Dataset(X_train, y_train, feature_name= total_feat_cols, categorical_feature= cate_cols + date_cols)
-            dvalid = lightgbm.Dataset(X_valid, y_valid, feature_name= total_feat_cols, categorical_feature= cate_cols + date_cols, reference= dtrain)
-            bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval=10,early_stopping_rounds= 20)
+            dtrain = lightgbm.Dataset(X_train, y_train)#, feature_name= total_feat_cols, categorical_feature= cate_cols + date_cols)
+            dvalid = lightgbm.Dataset(X_valid, y_valid, reference= dtrain)#, feature_name= total_feat_cols, categorical_feature= cate_cols + date_cols)
+            bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval= 20,early_stopping_rounds= 100)
             best_trees.append(bst.best_iteration)
             cv_pred += bst.predict(DataSet['test'][total_feat_cols], num_iteration=bst.best_iteration)
             cv_train[valid_index] += bst.predict(X_valid)
@@ -198,23 +223,26 @@ for s in range(times):
     final_cv_pred += cv_pred
 
     print('\n===================')
-    print('#%s CV score %.6f' % (s, utils.sum_weighted_tpr(DataSet['train']['label'], cv_train)))
-    print('#%s Current score %.6f' % (s, utils.sum_weighted_tpr(DataSet['train']['label'], final_cv_train/(s + 1.0))))
+    t_score = utils.sum_weighted_tpr(DataSet['train']['label'], cv_train)
+    c_score = utils.sum_weighted_tpr(DataSet['train']['label'], final_cv_train/(s + 1.0))
+    print('#%s CV score %.6f' % (s, t_score))
+    print('#%s Current score %.6f' % (s, c_score))
     print(fold_scores)
     print(best_trees, np.mean(best_trees))
     print('===================\n')
 
-    x_score.append(utils.sum_weighted_tpr(DataSet['train']['label'], cv_train))
+    x_score.append(t_score)
 
 print(x_score)
 
+final_score = utils.sum_weighted_tpr(DataSet['train']['label'], final_cv_train/times)
 ## output
 with utils.timer("model output"):
     OutputDir = '%s/model' % config.DataRootDir
     if (os.path.exists(OutputDir) == False):
         os.makedirs(OutputDir)
-    pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg.csv' % (OutputDir, strategy), index=False)
-    pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg.csv' % (OutputDir, strategy), index=False)
+    pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+    pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
 
 end = time.time()
 print('\n------------------------------------')
