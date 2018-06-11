@@ -61,61 +61,6 @@ def _plot_fig(train_results, valid_results, model_name):
     plt.savefig("%s/%s.png" % (FigOutputDir, model_name))
     plt.close()
 
-def _run_meta_model_dfm_ts():
-    ''''''
-    ## local CV
-    wtpr_results_cv = np.zeros(config.KFOLD, dtype=float)
-    wtpr_results_epoch_train = np.zeros((config.KFOLD, dfm_params["epoch"]), dtype=float)
-    wtpr_results_epoch_valid = np.zeros((config.KFOLD, dfm_params["epoch"]), dtype=float)
-    for fold in range(config.KFOLD):
-        FoldInputDir = '%s/kfold/%s' % (config.MetaModelInputDir, fold)
-        ## load data
-        with utils.timer('Load data'):
-            DataSet = {
-                'train_label': utils.hdf_loader('%s/train_label.hdf' % FoldInputDir, 'train_label'),
-                #'train_none_label': utils.hdf_loader('%s/train_none_label.hdf' % FoldInputDir, 'train_none_label'),
-                'valid_label': utils.hdf_loader('%s/valid_label.hdf' % FoldInputDir, 'valid_label'),
-                #'valid_none_label': utils.hdf_loader('%s/valid_none_label.hdf' % FoldInputDir, 'valid_none_label')
-            }
-        ## prepare data for DeepFM
-        with utils.timer('Prepare data'):
-            num_cols = [c for c in DataSet['train_label'].columns if(c.startswith('num_'))]
-            fd = DataReader.FeatureDictionary(dfTrain= DataSet['train_label'],
-                                              dfTest= DataSet['valid_label'],
-                                              numeric_cols= num_cols,
-                                              ignore_cols= config.IGNORE_COLS)
-            parser = DataReader.DataParser(fd)
-            Xi_train, Xv_train, y_train = parser.parse(df= DataSet['train_label'], has_label= True)
-            Xi_valid, Xv_valid, y_valid = parser.parse(df= DataSet['valid_label'], has_label= True)
-            dfm_params["feature_size"] = fd.feat_dim
-            dfm_params["field_size"] = len(Xi_train[0])
-        ## training
-        with utils.timer('Training on fold %s' % fold):
-            dfm = DeepFM(**dfm_params)
-            dfm.fit(Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid)
-        ## inference
-        with utils.timer('Inference on fold %s' % fold):
-            wtpr_results_cv[fold] = utils.sum_weighted_tpr(y_valid, dfm.predict(Xi_valid, Xv_valid))
-        wtpr_results_epoch_train[fold] = dfm.train_result
-        wtpr_results_epoch_valid[fold] = dfm.valid_result
-        print('fold %s, weighted tpr %.6f' % (fold, wtpr_results_cv[fold]))
-
-        break
-
-    # save result
-    if dfm_params["use_fm"] and dfm_params["use_deep"]:
-        clf_str = "DeepFM"
-    elif dfm_params["use_fm"]:
-        clf_str = "FM"
-    elif dfm_params["use_deep"]:
-        clf_str = "DNN"
-    print("%s: %.5f (%.5f)"%(clf_str, wtpr_results_cv.mean(), wtpr_results_cv.std()))
-    filename = "%s_Mean%.5f_Std%.5f.csv"%(clf_str, wtpr_results_cv.mean(), wtpr_results_cv.std())
-    #_make_submission(ids_test, y_test_meta, filename)
-
-    _plot_fig(wtpr_results_epoch_train, wtpr_results_epoch_valid, clf_str)
-    #return y_train_meta, y_test_meta
-
 def _load_data():
     ''''''
     valid_dfs = []

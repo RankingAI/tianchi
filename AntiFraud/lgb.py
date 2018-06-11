@@ -35,12 +35,12 @@ pd.set_option('display.max_rows', None)
 params = {
     "boosting": "gbdt",
     "objective": "binary",
-    "lambda_l2": 2,  # !!!
+    #"lambda_l2": 2,  # !!!
 
     "num_iterations": 5000,
     "learning_rate": 0.1,  # !!!
     # "max_depth": 8,  # !!!
-    'scale_pos_weight': 5,
+    #'scale_pos_weight': 5,
     'min_data_in_leaf': 2000,
     #'min_child_samples': 50,
     #'min_child_weight': 150,
