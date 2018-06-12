@@ -20,15 +20,15 @@ params = {
     "use_deep": True,
     "embedding_size": 8,
     "dropout_fm": [0.8, 0.8],
-    "deep_layers": [16, 16],
-    "dropout_deep": [0.5, 0.5, 0.5],
+    "deep_layers": [32, 32, 32, 32],
+    "dropout_deep": [0.5, 0.5, 0.2, 0.2, 0.1],
     "deep_layers_activation": tf.nn.relu,
-    "epoch": 7,
-    "batch_size": 1024,
-    "learning_rate": 0.0008,
+    "epoch": 20,
+    "batch_size": 256,
+    "learning_rate": 0.008,
     "optimizer_type": "adam",
     "batch_norm": 1,
-    "l2_reg": 0.45,
+    "l2_reg": 0.01,
     "verbose": True,
     "eval_metric": utils.sum_weighted_tpr,
 }
@@ -230,7 +230,7 @@ for s in range(times):
             ## training/inference
             with utils.timer('CV for fold %s' % fold):
                 dfm = DeepFM(**params)
-                dfm.fit(Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid)
+                dfm.fit(Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid, early_stopping= True)
                 Xi_test, Xv_test, ids = parser.parse(df= DataSet['test'][['id'] + total_feat_cols])
                 cv_pred += dfm.predict(Xi_test, Xv_test)
                 cv_train[valid_index] += dfm.predict(Xi_valid, Xv_valid)
