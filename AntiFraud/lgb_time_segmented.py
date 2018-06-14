@@ -16,10 +16,10 @@ params = {
     #"lambda_l2": 2,  # !!!
 
     "num_iterations": 5000,
-    "learning_rate": 0.001,  # !!!
-    # "max_depth": 8,  # !!!
+    "learning_rate": 0.1,  # !!!
+    "max_depth": 8,  # !!!
     #'scale_pos_weight': 5,
-    'min_data_in_leaf': 2000,
+    #'min_data_in_leaf': 2000,
     #'min_child_samples': 50,
     #'min_child_weight': 150,
     'min_split_gain': 0,
@@ -38,7 +38,7 @@ params = {
 }
 
 strategy = 'lgb_time_seg'
-debug = True
+debug = False
 
 start = time.time()
 ## loading data
@@ -156,7 +156,7 @@ with utils.timer('remove the unlabled'):
 entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]],axis=0).reset_index(drop=True)
 likely_cate_cols = []
 for c in raw_cols:
-    if(len(entire_data[c].value_counts()) <= 20):
+    if(len(entire_data[c].value_counts()) <= 10):
         likely_cate_cols.append(c)
 
 def evalerror(preds, dtrain):
@@ -193,8 +193,8 @@ for s in range(times):
                 X_train, X_valid = week_data[total_feat_cols].iloc[train_index,].reset_index(drop= True), week_data[total_feat_cols].iloc[valid_index,].reset_index(drop= True)
                 y_train, y_valid = week_data['label'].iloc[train_index,].reset_index(drop= True), week_data['label'].iloc[valid_index,].reset_index(drop= True)
 
-                dtrain = lightgbm.Dataset(X_train, y_train, feature_name= total_feat_cols)#, categorical_feature= likely_cate_cols + date_cols)
-                dvalid = lightgbm.Dataset(X_valid, y_valid, reference= dtrain, feature_name= total_feat_cols)#, categorical_feature= likely_cate_cols + date_cols)
+                dtrain = lightgbm.Dataset(X_train, y_train, feature_name= total_feat_cols, categorical_feature= date_cols)
+                dvalid = lightgbm.Dataset(X_valid, y_valid, reference= dtrain, feature_name= total_feat_cols, categorical_feature= date_cols)
 
                 bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval= 20,early_stopping_rounds= 100)
                 best_trees.append(bst.best_iteration)
@@ -212,7 +212,6 @@ for s in range(times):
             ## fill cv_train
             cv_train[week_data_index] = list(cv_train_week)
             print(np.sum(week_data['label']), np.sum([1.0 if(v > 0.5) else 0 for v in cv_train_week]))
-            sys.exit(1)
             week_score = utils.sum_weighted_tpr(week_data['label'], cv_train_week)
             week_scores.append(week_score)
             print('\n------------------------------------------')
