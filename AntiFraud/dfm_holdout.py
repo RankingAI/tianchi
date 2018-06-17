@@ -6,42 +6,44 @@ import utils
 from sklearn.model_selection import StratifiedKFold
 import lightgbm
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import MinMaxScaler
+import DataReader
+import tensorflow as tf
+from DeepFM import DeepFM
 
 sys.path.append("..")
 pd.set_option('display.max_rows', None)
 
 params = {
-    "boosting": "gbdt",
-    "objective": "binary",
-    'metric': "None",
-    #"lambda_l2": 2,  # !!!
-
-    "num_iterations": 5000,
-    "learning_rate": 0.1,  # !!!
-    "max_depth": 8,  # !!!
-    'scale_pos_weight': 1,
-    #'min_data_in_leaf': 2000,
-    #'min_child_samples': 50,
-    #'min_child_weight': 150,
-    'min_split_gain': 0,
-    'num_leaves': 255,
-    #'cat_smooth': 80,
-    #'cat_l2': 20,
-    #'drop_rate': 0.1,
-    #'max_drop': 50,
-    #'max_cat_threshold': 64,
-    'verbose': -10,
-
-    "feature_fraction": 0.6,
-    "bagging_fraction": 0.9,
-
-    "max_bin": 255,
+    'batch_norm_decay': 0.995,
+    "use_fm": True,
+    "use_deep": True,
+    "embedding_size": 8,
+    "dropout_fm": [0.8, 0.8],
+    "deep_layers": [32, 32, 32, 32],
+    "dropout_deep": [0.5, 0.5, 0.2, 0.2, 0.1],
+    "deep_layers_activation": tf.nn.relu,
+    "epoch": 20,
+    "batch_size": 1024,
+    "learning_rate": 0.008,
+    "optimizer_type": "adam",
+    "batch_norm": 1,
+    "l2_reg": 0.01,
+    "verbose": True,
+    "eval_metric": utils.sum_weighted_tpr,
 }
 
-strategy = 'lgb_holdout'
+start = time.time()
+if params["use_fm"] and params["use_deep"]:
+    clf_str = "deepfm"
+elif params["use_fm"]:
+    clf_str = "fm"
+elif params["use_deep"]:
+    clf_str = "dnn"
+strategy = 'meta_%s' % clf_str
+
 debug = False
 
-start = time.time()
 ## loading data
 cal_dtypes = {
     'dow': 'uint8',
@@ -148,28 +150,52 @@ print('=======================\n')
 raw_cols = [c for c in DataSet['train'].columns if(c.startswith('f'))]
 date_cols = [c for c in DataSet['train'].columns if(c.startswith('date_'))]
 total_feat_cols = raw_cols + date_cols
-#drop_cols = [c for c in date_cols if(c not in ['date_dow', 'date_is_holiday'])]
-#date_cols = [c for c in date_cols if(c not in drop_cols)]
-#total_feat_cols = [c for c in total_feat_cols if(c not in drop_cols)]
 print(total_feat_cols)
+
+## fill the missing with median
+with utils.timer('Fill the missing, and scaling'):
+    entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]], axis= 0).reset_index(drop= True)
+    nulls = (DataSet['train'].isnull().sum(axis= 0))/len(DataSet['train'])
+    medians = entire_data.median()
+    means = entire_data.mean()
+    for mod in ['train', 'test']:
+        for c in (raw_cols):
+            if(nulls[c] > 0.5):
+                DataSet[mod][c].fillna(0, inplace= True)
+            elif(nulls[c] > 0.1):
+                DataSet[mod][c].fillna(medians[c], inplace= True)
+            else:
+                DataSet[mod][c].fillna(means[c], inplace= True)
+    ## scaling
+    entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]], axis= 0).reset_index(drop= True)
+    scaler = MinMaxScaler()
+    scaler.fit(entire_data)
+    DataSet['train'][raw_cols] = scaler.transform(DataSet['train'][raw_cols])
+    DataSet['test'][raw_cols] = scaler.transform(DataSet['test'][raw_cols])
 
 with utils.timer('remove the unlabled'):
     for mod in ['train']:
         DataSet[mod] = DataSet[mod][DataSet[mod]['label'] != -1].reset_index(drop= True)
 
-entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]],axis=0).reset_index(drop=True)
-likely_cate_cols = []
-for c in raw_cols:
-    if(len(entire_data[c].value_counts()) <= 10):
-        likely_cate_cols.append(c)
+# entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]],axis=0).reset_index(drop=True)
+# likely_cate_cols = []
+# for c in raw_cols:
+#     if(len(entire_data[c].value_counts()) <= 10):
+#         likely_cate_cols.append(c)
 
 def evalerror(preds, dtrain):
     labels = dtrain.get_label()
     return 'swt', utils.sum_weighted_tpr(labels, preds), True
 
+## parser
+with utils.timer('reader'):
+    fd = DataReader.FeatureDictionary(dfTrain= DataSet['train'][total_feat_cols], dfTest= DataSet['test'][total_feat_cols],
+                                  numeric_cols= raw_cols, ignore_cols=config.IGNORE_COLS)
+    parser = DataReader.DataParser(fd)
+
 weeks = np.max(DataSet['train']['wno']) + 1
 kfold = 5
-times = 1
+times = 4
 final_cv_train = np.zeros(len(DataSet['train']))
 final_cv_pred = np.zeros(len(DataSet['test']))
 skf = StratifiedKFold(n_splits= kfold, random_state= None, shuffle= False)
@@ -187,78 +213,77 @@ for s in range(times):
         cv_train = np.zeros((len(DataSet['train']), weeks - 1))
         cv_pred = np.zeros((len(DataSet['test']), weeks - 1))
 
-        ## single model
         for w in range(weeks - 1):
             train_index = DataSet['train'].index[DataSet['train']['wno'] == w]
 
-            X_train, X_valid = DataSet['train'][total_feat_cols].iloc[train_index,].reset_index(drop= True), DataSet['train'][total_feat_cols].iloc[valid_index,].reset_index(drop= True)
-            y_train, y_valid = DataSet['train']['label'].iloc[train_index,].reset_index(drop= True), DataSet['train']['label'].iloc[valid_index,].reset_index(drop= True)
+            Xi_train, Xv_train, y_train = parser.parse(df= DataSet['train'][['label'] + total_feat_cols].iloc[train_index,],has_label=True)
+            Xi_valid, Xv_valid, y_valid = parser.parse(df= DataSet['train'][['label'] + total_feat_cols].iloc[valid_index,],has_label=True)
 
-            dtrain = lightgbm.Dataset(X_train, y_train, feature_name= total_feat_cols, categorical_feature= date_cols)
-            dvalid = lightgbm.Dataset(X_valid, y_valid, reference= dtrain, feature_name= total_feat_cols, categorical_feature= date_cols)
-            # train
-            bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval= 20,early_stopping_rounds= 100)
-            # predict on test
-            cv_pred[:,w] += bst.predict(DataSet['test'][total_feat_cols], num_iteration=bst.best_iteration)
-            # predict on valid
-            tmp_pred = bst.predict(X_valid, num_iteration= bst.best_iteration)
-            cv_train[valid_index, w] += tmp_pred
-            cv_train_avg[valid_index] += tmp_pred
-            # evaluate for valid
+            params["feature_size"] = fd.feat_dim
+            params["field_size"] = len(Xi_train[0])
+
+            dfm = DeepFM(**params)
+            dfm.fit(Xi_train, Xv_train, y_train, Xi_valid, Xv_valid, y_valid, early_stopping=True)
+
+            cv_train[valid_index, w] += dfm.predict(Xi_valid, Xv_valid)
+
+            Xi_test, Xv_test, ids = parser.parse(df=DataSet['test'][['id'] + total_feat_cols])
+            cv_pred[:, w] += dfm.predict(Xi_test, Xv_test)
+
             score = utils.sum_weighted_tpr(y_valid, cv_train[valid_index, w])
-            print('\n--------------------------------')
             print('#%s, week %s score %.6f' % (s, w, score))
-            print('valid: label %s, predict positives %s' % (np.sum(y_valid), (np.sum([1.0 if(v > 0.5) else 0 for v in cv_train[valid_index, w]]))))
-            print('--------------------------------\n')
+            print('valid: label %s, predict positives %s' % (
+            np.sum(y_valid), (np.sum([1.0 if (v > 0.5) else 0 for v in cv_train[valid_index, w]]))))
 
-        cv_score_avg = utils.sum_weighted_tpr(DataSet['train']['label'][valid_index], cv_train_avg[valid_index]/(weeks - 1))
-        print('\n================================')
-        print('#%s, cv score [averaged version] %.6f' % (s, cv_score_avg))
-        print('================================\n')
+            cv_score_avg = utils.sum_weighted_tpr(DataSet['train']['label'][valid_index],
+                                                  cv_train_avg[valid_index] / (weeks - 1))
+            print('\n================================')
+            print('#%s, cv score [averaged version] %.6f' % (s, cv_score_avg))
+            print('================================\n')
 
-        ## ensemble model
-        cv_train_ensemble = np.zeros(len(valid_index))
-        cv_pred_ensemble = np.zeros(len(DataSet['test']))
-        ## input for ensemble
-        X_train_valid = np.array(np.array(cv_train[valid_index,:].tolist()))
-        y_train_valid = np.array(DataSet['train']['label'][valid_index].tolist())
+            ## ensemble model
+            cv_train_ensemble = np.zeros(len(valid_index))
+            cv_pred_ensemble = np.zeros(len(DataSet['test']))
+            ## input for ensemble
+            X_train_valid = np.array(np.array(cv_train[valid_index, :].tolist()))
+            y_train_valid = np.array(DataSet['train']['label'][valid_index].tolist())
 
-        kf = skf.split(X_train_valid, y_train_valid)
-        for fold, (en_train_index, en_valid_index) in enumerate(kf):
-            X_train, X_valid = X_train_valid[en_train_index], X_train_valid[en_valid_index]
-            y_train, y_valid = y_train_valid[en_train_index], y_train_valid[en_valid_index]
+            kf = skf.split(X_train_valid, y_train_valid)
+            for fold, (en_train_index, en_valid_index) in enumerate(kf):
+                X_train, X_valid = X_train_valid[en_train_index], X_train_valid[en_valid_index]
+                y_train, y_valid = y_train_valid[en_train_index], y_train_valid[en_valid_index]
 
-            lr = LogisticRegression(C= 1.0)
-            lr.fit(X_train, y_train)
+                lr = LogisticRegression(C=1.0)
+                lr.fit(X_train, y_train)
 
-            cv_train_ensemble[en_valid_index] += lr.predict_proba(X_valid)[:,1]
-            cv_pred_ensemble += lr.predict_proba(cv_pred)[:,1]
+                cv_train_ensemble[en_valid_index] += lr.predict_proba(X_valid)[:, 1]
+                cv_pred_ensemble += lr.predict_proba(cv_pred)[:, 1]
 
-            score = utils.sum_weighted_tpr(y_valid, cv_train_ensemble[en_valid_index])
-            print('fold %s, score %.6f' % (fold, score))
+                score = utils.sum_weighted_tpr(y_valid, cv_train_ensemble[en_valid_index])
+                print('fold %s, score %.6f' % (fold, score))
 
-        cv_pred_ensemble /= kfold
-        final_cv_pred += cv_pred_ensemble
-        final_cv_train[valid_index] += cv_train_ensemble
+            cv_pred_ensemble /= kfold
+            final_cv_pred += cv_pred_ensemble
+            final_cv_train[valid_index] += cv_train_ensemble
 
-        t_score = utils.sum_weighted_tpr(y_train_valid, cv_train_ensemble)
-        c_score = utils.sum_weighted_tpr(y_train_valid, final_cv_train[valid_index]/(s + 1.0))
-        print('\n==============================')
-        print('#%s, cv score [ensemble version] %.6f(current), %.6f(aggregated)' % (s, t_score, c_score))
-        print('==============================\n')
+            t_score = utils.sum_weighted_tpr(y_train_valid, cv_train_ensemble)
+            c_score = utils.sum_weighted_tpr(y_train_valid, final_cv_train[valid_index] / (s + 1.0))
+            print('\n==============================')
+            print('#%s, cv score [ensemble version] %.6f(current), %.6f(aggregated)' % (s, t_score, c_score))
+            print('==============================\n')
 
-final_score = utils.sum_weighted_tpr(DataSet['train']['label'][valid_index], final_cv_train[valid_index]/times)
-print('final cv score %.6f' % final_score)
+    final_score = utils.sum_weighted_tpr(DataSet['train']['label'][valid_index], final_cv_train[valid_index] / times)
+    print('final cv score %.6f' % final_score)
 
-# ## output
-# with utils.timer("model output"):
-#     OutputDir = '%s/model' % config.DataRootDir
-#     if (os.path.exists(OutputDir) == False):
-#         os.makedirs(OutputDir)
-#     pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-#     pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-#
-# end = time.time()
-# print('\n------------------------------------')
-# print('%s done, time elapsed %ss' % (strategy, int(end - start)))
-# print('------------------------------------\n')
+    # ## output
+    # with utils.timer("model output"):
+    #     OutputDir = '%s/model' % config.DataRootDir
+    #     if (os.path.exists(OutputDir) == False):
+    #         os.makedirs(OutputDir)
+    #     pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+    #     pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+    #
+    # end = time.time()
+    # print('\n------------------------------------')
+    # print('%s done, time elapsed %ss' % (strategy, int(end - start)))
+    # print('------------------------------------\n')

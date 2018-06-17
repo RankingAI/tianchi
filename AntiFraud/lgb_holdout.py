@@ -19,7 +19,7 @@ params = {
     "num_iterations": 5000,
     "learning_rate": 0.1,  # !!!
     "max_depth": 8,  # !!!
-    #'scale_pos_weight': 5,
+    'scale_pos_weight': 1,
     #'min_data_in_leaf': 2000,
     #'min_child_samples': 50,
     #'min_child_weight': 150,
@@ -38,7 +38,7 @@ params = {
     "max_bin": 255,
 }
 
-strategy = 'lgb_time_seg'
+strategy = 'lgb_holdout'
 debug = False
 
 start = time.time()
@@ -148,6 +148,9 @@ print('=======================\n')
 raw_cols = [c for c in DataSet['train'].columns if(c.startswith('f'))]
 date_cols = [c for c in DataSet['train'].columns if(c.startswith('date_'))]
 total_feat_cols = raw_cols + date_cols
+#drop_cols = [c for c in date_cols if(c not in ['date_dow', 'date_is_holiday'])]
+#date_cols = [c for c in date_cols if(c not in drop_cols)]
+#total_feat_cols = [c for c in total_feat_cols if(c not in drop_cols)]
 print(total_feat_cols)
 
 with utils.timer('remove the unlabled'):
@@ -178,6 +181,9 @@ x_score = []
 for s in range(times):
     params['seed'] = s
     with utils.timer('train/inference'):
+        # for average version
+        cv_train_avg = np.zeros(len(DataSet['train']))
+        # for ensemble
         cv_train = np.zeros((len(DataSet['train']), weeks - 1))
         cv_pred = np.zeros((len(DataSet['test']), weeks - 1))
 
@@ -190,29 +196,39 @@ for s in range(times):
 
             dtrain = lightgbm.Dataset(X_train, y_train, feature_name= total_feat_cols, categorical_feature= date_cols)
             dvalid = lightgbm.Dataset(X_valid, y_valid, reference= dtrain, feature_name= total_feat_cols, categorical_feature= date_cols)
-
+            # train
             bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval= 20,early_stopping_rounds= 100)
-
+            # predict on test
             cv_pred[:,w] += bst.predict(DataSet['test'][total_feat_cols], num_iteration=bst.best_iteration)
-            cv_train[valid_index, w] += bst.predict(X_valid, num_iteration= bst.best_iteration)
-
+            # predict on valid
+            tmp_pred = bst.predict(X_valid, num_iteration= bst.best_iteration)
+            cv_train[valid_index, w] += tmp_pred
+            cv_train_avg[valid_index] += tmp_pred
+            # evaluate for valid
             score = utils.sum_weighted_tpr(y_valid, cv_train[valid_index, w])
+            print('\n--------------------------------')
             print('#%s, week %s score %.6f' % (s, w, score))
             print('valid: label %s, predict positives %s' % (np.sum(y_valid), (np.sum([1.0 if(v > 0.5) else 0 for v in cv_train[valid_index, w]]))))
+            print('--------------------------------\n')
+
+        cv_score_avg = utils.sum_weighted_tpr(DataSet['train']['label'][valid_index], cv_train_avg[valid_index]/(weeks - 1))
+        print('\n================================')
+        print('#%s, cv score [averaged version] %.6f' % (s, cv_score_avg))
+        print('================================\n')
 
         ## ensemble model
         cv_train_ensemble = np.zeros(len(valid_index))
         cv_pred_ensemble = np.zeros(len(DataSet['test']))
-
-        X_train_valid = np.array(cv_train[valid_index,:].tolist())
-        y_train_valid = DataSet['train']['label'][valid_index].tolist()
+        ## input for ensemble
+        X_train_valid = np.array(np.array(cv_train[valid_index,:].tolist()))
+        y_train_valid = np.array(DataSet['train']['label'][valid_index].tolist())
 
         kf = skf.split(X_train_valid, y_train_valid)
         for fold, (en_train_index, en_valid_index) in enumerate(kf):
             X_train, X_valid = X_train_valid[en_train_index], X_train_valid[en_valid_index]
             y_train, y_valid = y_train_valid[en_train_index], y_train_valid[en_valid_index]
 
-            lr = LogisticRegression(C= 0.1)
+            lr = LogisticRegression(C= 1.0)
             lr.fit(X_train, y_train)
 
             cv_train_ensemble[en_valid_index] += lr.predict_proba(X_valid)[:,1]
@@ -223,36 +239,26 @@ for s in range(times):
 
         cv_pred_ensemble /= kfold
         final_cv_pred += cv_pred_ensemble
-        final_cv_train[valid_index] += cv_pred_ensemble
+        final_cv_train[valid_index] += cv_train_ensemble
 
-        cv_score = utils.sum_weighted_tpr(y_train_valid, cv_train_ensemble)
-        print('#%s, ensemble cv score %.6f' % (s, cv_score))
-
-    # print('\n===================')
-    # t_score = utils.sum_weighted_tpr(DataSet['train']['label'].iloc[valid_index,], cv_train[valid_index])
-    # c_score = utils.sum_weighted_tpr(DataSet['train']['label'].iloc[valid_index,], final_cv_train/(s + 1.0))
-    # print('#%s CV score %.6f' % (s, t_score))
-    # print('#%s Current score %.6f' % (s, c_score))
-    # print('===================\n')
-
-final_cv_pred /= times
-final_cv_train /= times
+        t_score = utils.sum_weighted_tpr(y_train_valid, cv_train_ensemble)
+        c_score = utils.sum_weighted_tpr(y_train_valid, final_cv_train[valid_index]/(s + 1.0))
+        print('\n==============================')
+        print('#%s, cv score [ensemble version] %.6f(current), %.6f(aggregated)' % (s, t_score, c_score))
+        print('==============================\n')
 
 final_score = utils.sum_weighted_tpr(DataSet['train']['label'][valid_index], final_cv_train[valid_index]/times)
 print('final cv score %.6f' % final_score)
 
-## output
-with utils.timer("model output"):
-    OutputDir = '%s/model' % config.DataRootDir
-    if (os.path.exists(OutputDir) == False):
-        os.makedirs(OutputDir)
-    pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-    pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-
-end = time.time()
-print('\n------------------------------------')
-print('%s done, time elapsed %ss' % (strategy, int(end - start)))
-print('------------------------------------\n')
-
-
-
+# ## output
+# with utils.timer("model output"):
+#     OutputDir = '%s/model' % config.DataRootDir
+#     if (os.path.exists(OutputDir) == False):
+#         os.makedirs(OutputDir)
+#     pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+#     pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+#
+# end = time.time()
+# print('\n------------------------------------')
+# print('%s done, time elapsed %ss' % (strategy, int(end - start)))
+# print('------------------------------------\n')

@@ -42,7 +42,6 @@ elif params["use_deep"]:
     clf_str = "dnn"
 strategy = 'meta_%s' % clf_str
 
-start = time.time()
 ## loading data
 cal_dtypes = {
     'dow': 'uint8',
