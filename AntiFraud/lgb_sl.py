@@ -176,172 +176,111 @@ final_cv_train = np.zeros(len(DataSet['train']))
 final_cv_pred = np.zeros(len(DataSet['test']))
 skf = StratifiedKFold(n_splits= kfold, random_state= None, shuffle= False)
 
+def sl_train(X, y, X_test, y_test, sl_valid_index, param, mode= 'train'):
+
+    kf = skf.split(X, y)
+    cv_train = np.zeros(len(X))
+    cv_pred = np.zeros(len(X_test))
+
+    fold_scores = []
+    for pre_fold, (train_index, valid_index) in enumerate(kf):
+        X_train, X_valid = X.iloc[train_index,], X.iloc[valid_index,]
+        y_train, y_valid = y[train_index], y[valid_index]
+
+        dtrain = lightgbm.Dataset(X_train, y_train, feature_name=total_feat_cols, categorical_feature=date_cols)
+        dvalid = lightgbm.Dataset(X_valid, y_valid, reference=dtrain, feature_name=total_feat_cols,categorical_feature=date_cols)
+
+        # train
+        bst = lightgbm.train(param, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval=20,early_stopping_rounds=100)
+
+        # predict on test
+        cv_pred += bst.predict(X_test, num_iteration=bst.best_iteration)
+
+        # predict on valid
+        cv_train[valid_index] += bst.predict(X_valid, num_iteration=bst.best_iteration)
+        #
+        score = utils.sum_weighted_tpr(y_valid, cv_train[valid_index])
+        fold_scores.append(score)
+
+    cv_pred /= kfold
+    cv_score = utils.sum_weighted_tpr(y, cv_train)
+    sl_valid_score = .0
+    if(mode != 'train'):
+        sl_valid_score = utils.sum_weighted_tpr(y_test[sl_valid_index], cv_pred[sl_valid_index])
+    print('\n============================')
+    print('pre-train cv score %.6f, eval on valid part of SL %.6f' % (cv_score, sl_valid_score))
+    print('fold scores: ')
+    print(fold_scores)
+    print('============================\n')
+
+    return cv_pred
+
+def sl_sampling(total_index):
+
+    sampling_num = int(sl_sampling_rate * len(total_index))
+    #sl_train_index = np.random.choice(total_index, sampling_num)
+    #sl_valid_index = [idx for idx in total_index if (idx not in sl_train_index)]
+
+    return total_index[:sampling_num], total_index[sampling_num:]
+
+
+## validate with the last week
+train_index = DataSet['train'].index[DataSet['train']['wno'] <= int(weeks / 2)]  # 0, 1, 2, 3, 4
+total_valid_index = DataSet['train'].index[DataSet['train']['wno'] > int(weeks / 2)]  # 5, 6, 7, 8
+
+sl_train_index, sl_valid_index = sl_sampling(total_valid_index)
+
+re_sl_train_index, re_sl_valid_index = sl_sampling(DataSet['test'].index)
+
 x_score = []
 for s in range(times):
     params['seed'] = s
     np.random.seed(s)
     with utils.timer('train/inference'):
 
-        ## validate with the last week
-        train_index = DataSet['train'].index[DataSet['train']['wno'] <= int(weeks/2)] # 0, 1, 2, 3, 4
-        total_valid_index = DataSet['train'].index[DataSet['train']['wno'] > int(weeks/2)] # 5, 6, 7, 8
-
-        ## sampling on valid
-        sampling_num = int(sl_sampling_rate * len(total_valid_index))
-        with utils.timer('psudo label sampling'):
-            sl_train_index = np.random.choice(total_valid_index, sampling_num)
-            sl_valid_index = [idx for idx in total_valid_index if(idx not in sl_train_index)]
-
         ####### pre-train with cv #######
-        X_pre_train_valid = DataSet['train'][total_feat_cols].iloc[train_index,].reset_index(drop= True)
-        y_pre_train_valid = np.array(list(DataSet['train']['label'][train_index]))
+        X_pre_train_valid = DataSet['train'][total_feat_cols].iloc[train_index,].reset_index(drop= True) # reset index
+        y_pre_train_valid = np.array(list(DataSet['train']['label'][train_index])) # reset index
+        X_sl_test = DataSet['train'][total_feat_cols].iloc[sl_valid_index].reset_inex(drop= True) # reset index
+        y_sl_test = np.array(list(DataSet['train']['label'][sl_valid_index])) # reset index
 
-        kf = skf.split(X_pre_train_valid, y_pre_train_valid)
-        cv_pre_train = np.zeros(len(train_index))
-        cv_pre_pred = np.zeros(len(DataSet['train']))
-
-        pre_fold_scores = []
-        for pre_fold, (cv_train_index, cv_valid_index) in enumerate(kf):
-            X_train, X_valid = X_pre_train_valid.iloc[cv_train_index,], X_pre_train_valid.iloc[cv_valid_index,]
-            y_train, y_valid = y_pre_train_valid[cv_train_index], y_pre_train_valid[cv_valid_index]
-
-            dtrain = lightgbm.Dataset(X_train, y_train, feature_name=total_feat_cols, categorical_feature=date_cols)
-            dvalid = lightgbm.Dataset(X_valid, y_valid, reference=dtrain, feature_name=total_feat_cols,categorical_feature=date_cols)
-
-            # train
-            bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval=20,early_stopping_rounds=100)
-            # predict on test
-            cv_pre_pred[total_valid_index] += bst.predict(DataSet['train'][total_feat_cols].iloc[total_valid_index,], num_iteration=bst.best_iteration)
-            # predict on valid
-            cv_pre_train[cv_valid_index] += bst.predict(X_valid, num_iteration= bst.best_iteration)
-            #
-            fold_score = utils.sum_weighted_tpr(y_valid, cv_pre_train[cv_valid_index])
-            pre_fold_scores.append(fold_score)
-
-        cv_pre_pred /= kfold
-        pre_cv_score = utils.sum_weighted_tpr(y_pre_train_valid, cv_pre_train)
-        pre_pred_valid_score = utils.sum_weighted_tpr(DataSet['train']['label'][sl_valid_index], cv_pre_pred[sl_valid_index])
-        print('\n============================')
-        print('pre-train cv score %.6f, eval on valid part of SL %.6f' % (pre_cv_score, pre_pred_valid_score))
-        print('fold scores: ')
-        print(pre_fold_scores)
-        print('============================\n')
-        ###### end of pre-train #########
+        pre_cv_pred = sl_train(X_pre_train_valid, y_pre_train_valid, X_sl_test, y_sl_test, sl_valid_index, params, 'train')
 
         ###### post-train ##########
         post_train_valid_index = list(train_index) + list(sl_train_index)
         X_post_train_valid = DataSet['train'][total_feat_cols].iloc[post_train_valid_index,].reset_index(drop= True)
         y_post_train_valid = np.array(list(DataSet['train']['label'][post_train_valid_index]))
-        y_post_train_valid[len(train_index):] = [1 if(v > 0.5) else 0 for v in cv_pre_pred[sl_train_index]] ## reset with psudo label
+        y_post_train_valid[len(train_index):] = [1 if(v > 0.5) else 0 for v in pre_cv_pred[sl_train_index]] ## reset with psudo label
 
-        kf = skf.split(X_post_train_valid, y_post_train_valid)
-        cv_post_train = np.zeros(len(post_train_valid_index))
-        cv_post_pred = np.zeros(len(DataSet['train']))
+        post_cv_pred = sl_train(X_post_train_valid, y_post_train_valid, X_sl_test, y_sl_test, sl_valid_index, params, 'train')
+        final_cv_train += post_cv_pred
 
-        post_fold_scores = []
-        for post_fold, (cv_train_index, cv_valid_index) in enumerate(kf):
-            X_train, X_valid = X_post_train_valid.iloc[cv_train_index,], X_post_train_valid.iloc[cv_valid_index,]
-            y_train, y_valid = y_post_train_valid[cv_train_index], y_post_train_valid[cv_valid_index]
+        ####################################### re-train #################################
+        re_y_sl_test = np.zeros(len(DataSet['test']))
 
-            dtrain = lightgbm.Dataset(X_train, y_train, feature_name=total_feat_cols, categorical_feature=date_cols)
-            dvalid = lightgbm.Dataset(X_valid, y_valid, reference=dtrain, feature_name=total_feat_cols,categorical_feature=date_cols)
+        ######## pre-train with CV ############
+        re_pre_cv_pred = sl_train(DataSet['train'][total_feat_cols], DataSet['train']['label'], DataSet['test'][total_feat_cols], re_y_sl_test, re_sl_valid_index, params, 'test')
 
-            # train
-            bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval=20,early_stopping_rounds=100)
-            # predict on test
-            cv_post_pred[sl_valid_index] += bst.predict(DataSet['train'][total_feat_cols].iloc[sl_valid_index,], num_iteration=bst.best_iteration)
-            # predict on valid
-            cv_post_train[cv_valid_index] += bst.predict(X_valid, num_iteration= bst.best_iteration)
-            #
-            fold_score = utils.sum_weighted_tpr(y_valid, cv_post_train[cv_valid_index])
-            post_fold_scores.append(fold_score)
+        ######## post-train ##########
+        re_X_post_train_valid = pd.concat([DataSet['train'][total_feat_cols], DataSet['test'][total_feat_cols].iloc[re_sl_train_index]], axis= 1, ignore_index= True)
+        re_pre_cv_pred_label = [1 if(v > 0.5) else 0 for v in re_pre_cv_pred]
+        re_y_post_train_valid = np.hstack([DataSet['train']['label'], re_pre_cv_pred_label[re_sl_train_index]])
 
-        cv_post_pred /= kfold
-        pre_cv_score = utils.sum_weighted_tpr(y_post_train_valid, cv_post_train)
-        pre_pred_valid_score = utils.sum_weighted_tpr(DataSet['train']['label'][sl_valid_index], cv_post_pred[sl_valid_index])
-        print('\n============================')
-        print('pre-train cv score %.6f, eval on valid part of SL %.6f' % (pre_cv_score, pre_pred_valid_score))
-        print('fold scores: ')
-        print(post_fold_scores)
-        print('============================\n')
-        ##### end of post-train ###########
+        re_post_cv_pred = sl_train(re_X_post_train_valid, re_y_post_train_valid, DataSet['test'][total_feat_cols], re_y_sl_test, re_sl_valid_index, params, 'test')
+        final_cv_pred += re_post_cv_pred
 
-        # ######### re-train on whole data set #########
-        # re_sampling_num = int(sl_sampling_rate * len(DataSet['test']))
-        # with utils.timer('psudo label sampling'):
-        #     sl_re_train_index = np.random.choice(DataSet['test'].index, re_sampling_num)
-        #     sl_re_valid_index = [idx for idx in DataSet['test'].index if(idx not in sl_re_train_index)]
+final_score = utils.sum_weighted_tpr(DataSet['train']['label'][sl_valid_index], final_cv_train[sl_valid_index] / times)
+print('final cv score %.6f' % final_score)
 
-        ####### pre-train with cv #######
-        # X_re_pre_train_valid = DataSet['train'][total_feat_cols]
-        # y_re_pre_train_valid = DataSet['train']['label']
-        #
-        # kf = skf.split(X_re_pre_train_valid, y_re_pre_train_valid)
-        # cv_re_pre_train = np.zeros(len(DataSet['train']))
-        # cv_re_pre_pred = np.zeros(len(DataSet['test']))
-        #
-        # re_pre_fold_scores = []
-        # for re_pre_fold, (cv_train_index, cv_valid_index) in enumerate(kf):
-        #     X_train, X_valid = X_re_pre_train_valid.iloc[cv_train_index,], X_re_pre_train_valid.iloc[cv_valid_index,]
-        #     y_train, y_valid = y_re_pre_train_valid[cv_train_index], y_re_pre_train_valid[cv_valid_index]
-        #
-        #     dtrain = lightgbm.Dataset(X_train, y_train, feature_name=total_feat_cols, categorical_feature=date_cols)
-        #     dvalid = lightgbm.Dataset(X_valid, y_valid, reference=dtrain, feature_name=total_feat_cols,categorical_feature=date_cols)
-        #
-        #     # train
-        #     bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval=20,early_stopping_rounds=100)
-        #     # predict on test
-        #     cv_re_pre_pred += bst.predict(DataSet['test'][total_feat_cols], num_iteration=bst.best_iteration)
-        #     # predict on valid
-        #     cv_re_pre_train[cv_valid_index] += bst.predict(X_valid, num_iteration= bst.best_iteration)
-        #     #
-        #     fold_score = utils.sum_weighted_tpr(y_valid, cv_re_pre_train[cv_valid_index])
-        #     re_pre_fold_scores.append(fold_score)
-        #
-        # cv_re_pre_pred /= kfold
-        # re_pre_cv_score = utils.sum_weighted_tpr(y_re_pre_train_valid, cv_re_pre_train)
-        # re_pre_pred_valid_score = utils.sum_weighted_tpr(DataSet['train']['label'][sl_re_valid_index], cv_re_pre_pred[sl_re_valid_index])
-        # print('\n============================')
-        # print('pre-train cv score %.6f, eval on valid part of SL %.6f' % (re_pre_cv_score, re_pre_pred_valid_score))
-        # print('fold scores: ')
-        # print(re_pre_fold_scores)
-        # print('============================\n')
-        ###### end of pre-train #########
+## output
+with utils.timer("model output"):
+    OutputDir = '%s/model' % config.DataRootDir
+    if (os.path.exists(OutputDir) == False):
+        os.makedirs(OutputDir)
+    pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+    pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
 
-        # ###### post-train ##########
-        # re_post_train_valid_data = pd.concat([DataSet['train'][total_feat_cols], DataSet['test'][total_feat_cols].iloc[sl_re_train_index]], axis= 1, ignore_index= True)
-        # X_post_train_valid = DataSet['train'][total_feat_cols].iloc[post_train_valid_index,].reset_index(drop= True)
-        # y_post_train_valid = np.array(list(DataSet['train']['label'][post_train_valid_index]))
-        # y_post_train_valid[len(train_index):] = [1 if(v > 0.5) else 0 for v in cv_pre_pred[sl_train_index]] ## reset with psudo label
-        #
-        # kf = skf.split(X_post_train_valid, y_post_train_valid)
-        # cv_post_train = np.zeros(len(post_train_valid_index))
-        # cv_post_pred = np.zeros(len(DataSet['train']))
-        #
-        # post_fold_scores = []
-        # for post_fold, (cv_train_index, cv_valid_index) in enumerate(kf):
-        #     X_train, X_valid = X_post_train_valid.iloc[cv_train_index,], X_post_train_valid.iloc[cv_valid_index,]
-        #     y_train, y_valid = y_post_train_valid[cv_train_index], y_post_train_valid[cv_valid_index]
-        #
-        #     dtrain = lightgbm.Dataset(X_train, y_train, feature_name=total_feat_cols, categorical_feature=date_cols)
-        #     dvalid = lightgbm.Dataset(X_valid, y_valid, reference=dtrain, feature_name=total_feat_cols,categorical_feature=date_cols)
-        #
-        #     # train
-        #     bst = lightgbm.train(params, dtrain, valid_sets=dvalid, feval=evalerror, verbose_eval=20,early_stopping_rounds=100)
-        #     # predict on test
-        #     cv_post_pred[sl_valid_index] += bst.predict(DataSet['train'][total_feat_cols].iloc[sl_valid_index,], num_iteration=bst.best_iteration)
-        #     # predict on valid
-        #     cv_post_train[cv_valid_index] += bst.predict(X_valid, num_iteration= bst.best_iteration)
-        #     #
-        #     fold_score = utils.sum_weighted_tpr(y_valid, cv_post_train[cv_valid_index])
-        #     post_fold_scores.append(fold_score)
-        #
-        # cv_post_pred /= kfold
-        # pre_cv_score = utils.sum_weighted_tpr(y_post_train_valid, cv_post_train)
-        # pre_pred_valid_score = utils.sum_weighted_tpr(DataSet['train']['label'][sl_valid_index], cv_post_pred[sl_valid_index])
-        # print('\n============================')
-        # print('pre-train cv score %.6f, eval on valid part of SL %.6f' % (pre_cv_score, pre_pred_valid_score))
-        # print('fold scores: ')
-        # print(post_fold_scores)
-        # print('============================\n')
-        # ##### end of post-train ###########
+end = time.time()
+print('\n------------------------------------')
+print('%s done, time elapsed %ss' % (strategy, int(end - start)))
+print('------------------------------------\n')
