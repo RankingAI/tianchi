@@ -172,8 +172,8 @@ final_cv_pred = np.zeros(len(DataSet['test']))
 
 x_score = []
 
-cv_train_1_index = DataSet['train'].index[DataSet['wno'] >= weeks - kfold]
-cv_train_2_index = DataSet['train'].index[DataSet['wno'] >= weeks - kfold + 1]
+cv_train_1_index = DataSet['train'].index[DataSet['train']['wno'] >= weeks - kfold]
+cv_train_2_index = DataSet['train'].index[DataSet['train']['wno'] >= weeks - kfold + 1]
 
 for s in range(times):
     best_trees = []
@@ -182,14 +182,14 @@ for s in range(times):
     cv_pred = np.zeros(len(DataSet['test']))
     for fold in range(kfold):
         w_train_max = weeks - (kfold - fold + 1)
-        train_index = DataSet['train'].index[DataSet['wno'] <= w_train_max]
-        valid_1_index, valid_2_index = DataSet['train'].index[DataSet['wno'] == w_train_max + 1], DataSet['train'].index[DataSet['wno'] == w_train_max + 2]
+        train_index = DataSet['train'].index[DataSet['train']['wno'] <= w_train_max]
+        valid_1_index, valid_2_index = DataSet['train'].index[DataSet['train']['wno'] == w_train_max + 1], DataSet['train'].index[DataSet['train']['wno'] == w_train_max + 2]
 
         X_train = DataSet['train'][total_feat_cols].iloc[train_index, ].reset_index(drop= True)
         X_valid_1, X_valid_2 = DataSet['train'][total_feat_cols].iloc[valid_1_index, ].reset_index(drop= True), DataSet['train'][total_feat_cols].iloc[valid_2_index, ].reset_index(drop= True)
 
         y_train = DataSet['train']['label'].iloc[train_index,].reset_index(drop=True)
-        y_valid_1, y_valid_2 = DataSet['train']['label'].iloc[valid_1_index,].reset_index(drop=True),DataSet['train']['label'].iloc[valid_1_index,].reset_index(drop=True)
+        y_valid_1, y_valid_2 = DataSet['train']['label'].iloc[valid_1_index,].reset_index(drop=True), DataSet['train']['label'].iloc[valid_2_index,].reset_index(drop=True)
 
         dtrain = lightgbm.Dataset(X_train, y_train, feature_name=total_feat_cols, categorical_feature=date_cols)
         dvalid = lightgbm.Dataset(X_valid_1, y_valid_1, reference=dtrain, feature_name=total_feat_cols, categorical_feature=date_cols)
@@ -205,10 +205,12 @@ for s in range(times):
         # evaluate for valid_1
         score_1 = utils.sum_weighted_tpr(y_valid_1, cv_train_1[valid_1_index])
         # evaluate for valid_2
-        score_2 = utils.sum_weighted_tpr(y_valid_2, cv_train_2[valid_2_index])
+        if(fold != kfold - 1):
+            score_2 = utils.sum_weighted_tpr(y_valid_2, cv_train_2[valid_2_index])
         print('#%s, fold %s score_1 %.6f, score_2 %.6f' % (s, fold, score_1, score_2))
         print('valid_1: label %s, predict positives %s' % (np.sum(y_valid_1), (np.sum([1.0 if (v > 0.5) else 0 for v in cv_train_1[valid_1_index]]))))
-        print('valid_2: label %s, predict positives %s' % (np.sum(y_valid_2), (np.sum([1.0 if (v > 0.5) else 0 for v in cv_train_2[valid_2_index]]))))
+        if(fold != kfold - 1):
+            print('valid_2: label %s, predict positives %s' % (np.sum(y_valid_2), (np.sum([1.0 if (v > 0.5) else 0 for v in cv_train_2[valid_2_index]]))))
     cv_pred /= kfold
     final_cv_train_1 += cv_train_1
     final_cv_train_2 += cv_train_2

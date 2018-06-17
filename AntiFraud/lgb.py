@@ -38,18 +38,18 @@ params = {
     #"lambda_l2": 2,  # !!!
 
     "num_iterations": 5000,
-    "learning_rate": 0.1,  # !!!
+    "learning_rate": 0.12,  # !!!
     # "max_depth": 8,  # !!!
     #'scale_pos_weight': 5,
     'min_data_in_leaf': 2000,
     #'min_child_samples': 50,
     #'min_child_weight': 150,
     'min_split_gain': 0,
-    'num_leaves': 31,
-    'cat_smooth': 80,
-    'cat_l2': 20,
-    'drop_rate': 0.1,
-    'max_drop': 50,
+    'num_leaves': 255,
+    #'cat_smooth': 80,
+    #'cat_l2': 20,
+    #'drop_rate': 0.1,
+    #'max_drop': 50,
     #'max_cat_threshold': 64,
 
     "feature_fraction": 0.6,
@@ -196,7 +196,7 @@ for s in range(times):
     cv_train = np.zeros(len(DataSet['train']))
     cv_pred = np.zeros(len(DataSet['test']))
 
-    params['seed'] = 2018
+    params['seed'] = s
 
     kf = skf.split(DataSet['train'][total_feat_cols], DataSet['train']['label'])
 

@@ -14,31 +14,35 @@ pd.set_option('display.max_rows', None)
 
 strategy = 'lgb_imputed'
 
-debug = True
+debug = False
 DataBase = './data'
 
 impute_params = {
     'boosting': 'gbdt',
     'objective': 'regression',
-    'metric': 'l2',
-    'num_leaves': 31,
+    'metric': 'None',
+    'max_depth': 8,
+    #'num_leaves': 31,
     'num_iterations': 5000,
     'learning_rate': 0.005,
     'feature_fraction': 0.9,
     'bagging_fraction': 0.9,
-    'verbose': -1,
+    #'silent': True,
+    'verbose': -10,
 }
 
 params = {
     "boosting": "gbdt",
     "objective": "binary",
+    'metric': 'None',
 
     "num_iterations": 5000,
     "learning_rate": 0.1,  # !!!
     #'scale_pos_weight': 5,
-    'min_data_in_leaf': 2000,
+    'max_depth': 8,
+    #'min_data_in_leaf': 2000,
     'min_split_gain': 0,
-    'num_leaves': 255,
+    #'num_leaves': 255,
 
     "feature_fraction": 0.6,
     "bagging_fraction": 0.9,
@@ -107,13 +111,20 @@ if __name__ == '__main__':
             group_null_dict[null_dict[k]].append(k)
     ## check
     sorted_list = sorted(group_null_dict.items(), key= lambda x: x[0], reverse= True)
-    print(sorted_list)
+    for sl in sorted_list:
+        print(sl[0], sl[1])
+    print('---------------------- before imputing ------------------------------')
+    print('train %s, test %s' % (len(DataSet['train']),len(DataSet['test'])))
+    print(DataSet['train'][sorted_list[1][1]].isnull().sum(axis=0))
+    print(DataSet['test'][sorted_list[1][1]].isnull().sum(axis=0))
     updated_data = entire_data.copy()
     ##
     for sl in sorted_list:
         g_ratio = sl[0]
         if(g_ratio == 0):
             continue
+        #if(g_ratio != 0.40662401356287969):
+        #    continue
         g_targets = sl[1]
         candidate_feats = [f for f in raw_features if(f not in g_targets)]
         g_start = time.time()
@@ -121,8 +132,8 @@ if __name__ == '__main__':
             test_index = entire_data.index[entire_data[target].isnull() == True]
             train_valid_index = entire_data.index[entire_data[target].isnull() == False]
 
-            train_valid = entire_data.iloc[train_valid_index,].reset_index(drop= True)
             test = entire_data.iloc[test_index,].reset_index(drop= True)
+            train_valid = entire_data.iloc[train_valid_index,].reset_index(drop= True)
 
             kfold = KFold(n_splits=5, random_state= 2018, shuffle=True)
             kf = kfold.split(train_valid)
@@ -141,7 +152,7 @@ if __name__ == '__main__':
                 dtrain = lightgbm.Dataset(X_train,y_train)
                 dvalid = lightgbm.Dataset(X_valid, y_valid,reference=dtrain)
 
-                bst = lightgbm.train(impute_params, dtrain, valid_sets=dvalid, verbose_eval=20,early_stopping_rounds=100)
+                bst = lightgbm.train(impute_params, dtrain, valid_sets=dvalid, verbose_eval= None,early_stopping_rounds=100)
 
                 ## for valid
                 cv_train[valid_index] += bst.predict(X_valid)
@@ -153,6 +164,7 @@ if __name__ == '__main__':
             print('\n=================================')
             print('ratio group %.6f, target %s, mse %.6f' % (g_ratio, target, mse))
             print('==================================\n')
+            cv_pred /= 5
 
             updated_data[target].iloc[test_index,] = list(cv_pred)
 
@@ -161,11 +173,14 @@ if __name__ == '__main__':
         ## CHECK
         #print(updated_data[g_targets].isnull().sum(axis= 0))
     train_len = len(DataSet['train'])
-    DataSet['train'][raw_features] = updated_data[:train_len]
-    DataSet['test'][raw_features] = updated_data[train_len:]
-    # print(DataSet['train'].isnull().sum(axis=0))
-    # print(DataSet['test'].isnull().sum(axis=0))
-    # sys.exit(1)
+    DataSet['train'][raw_features] = updated_data[raw_features].iloc[:train_len,].values
+    DataSet['test'][raw_features] = updated_data[raw_features].iloc[train_len:,].values
+    utils.hdf_saver(DataSet['train'], '%s/raw/train.hdf' % config.DataRootDir, 'train')
+    utils.hdf_saver(DataSet['test'], '%s/raw/test.hdf' % config.DataRootDir, 'test')
+    print('------------------------------ after imputing -------------------------')
+    print('train %s, test %s' % (len(DataSet['train']),len(DataSet['test'])))
+    print(DataSet['train'][sorted_list[1][1]].isnull().sum(axis=0))
+    print(DataSet['test'][sorted_list[1][1]].isnull().sum(axis=0))
 
     ## train with these filled values
     with utils.timer('Add date features'):
@@ -208,6 +223,7 @@ if __name__ == '__main__':
         DataSet['calendar'].drop(['prevday', 'nextday'], axis=1, inplace=True)
         DataSet['calendar']['prev_is_holiday'].fillna(0, inplace=True)
         DataSet['calendar']['next_is_holiday'].fillna(0, inplace=True)
+        DataSet['calendar'].drop(['hol_days'], axis=1, inplace=True)
 
     ## renaming
     with utils.timer('Rename columns'):

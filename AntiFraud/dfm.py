@@ -13,7 +13,7 @@ from DeepFM import DeepFM
 sys.path.append("..")
 pd.set_option('display.max_rows', None)
 
-debug = True
+debug = False
 params = {
     'batch_norm_decay': 0.995,
     "use_fm": True,
@@ -24,7 +24,7 @@ params = {
     "dropout_deep": [0.5, 0.5, 0.2, 0.2, 0.1],
     "deep_layers_activation": tf.nn.relu,
     "epoch": 20,
-    "batch_size": 256,
+    "batch_size": 1024,
     "learning_rate": 0.008,
     "optimizer_type": "adam",
     "batch_norm": 1,
