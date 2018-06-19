@@ -40,7 +40,7 @@ params = {
 
 strategy = 'lgb_sl'
 debug = True
-sl_sampling_rate = 0.1
+sl_sampling_rate = 0.2
 
 start = time.time()
 ## loading data
@@ -205,7 +205,7 @@ def sl_train(X, y, X_test, y_test, sl_valid_index, param, mode= 'train'):
     cv_pred /= kfold
     cv_score = utils.sum_weighted_tpr(y, cv_train)
     sl_valid_score = .0
-    if(mode != 'train'):
+    if(mode == 'train'):
         sl_valid_score = utils.sum_weighted_tpr(y_test[sl_valid_index], cv_pred[sl_valid_index])
     print('\n============================')
     print('pre-train cv score %.6f, eval on valid part of SL %.6f' % (cv_score, sl_valid_score))
@@ -213,74 +213,84 @@ def sl_train(X, y, X_test, y_test, sl_valid_index, param, mode= 'train'):
     print(fold_scores)
     print('============================\n')
 
-    return cv_pred
+    return cv_pred, cv_score, sl_valid_score
 
-def sl_sampling(total_index):
-
-    sampling_num = int(sl_sampling_rate * len(total_index))
-    #sl_train_index = np.random.choice(total_index, sampling_num)
-    #sl_valid_index = [idx for idx in total_index if (idx not in sl_train_index)]
-
-    return total_index[:sampling_num], total_index[sampling_num:]
-
+# def sl_sampling(total_index):
+#     sampling_num = int(sl_sampling_rate * len(total_index))
+#     return total_index[:sampling_num].tolist(), total_index[sampling_num:].tolist()
 
 ## validate with the last week
 train_index = DataSet['train'].index[DataSet['train']['wno'] <= int(weeks / 2)]  # 0, 1, 2, 3, 4
-total_valid_index = DataSet['train'].index[DataSet['train']['wno'] > int(weeks / 2)]  # 5, 6, 7, 8
+sl_test_index = DataSet['train'].index[DataSet['train']['wno'] > int(weeks / 2)]  # 5, 6, 7, 8
 
-sl_train_index, sl_valid_index = sl_sampling(total_valid_index)
+X_pre_train_valid = DataSet['train'][total_feat_cols].iloc[train_index,].reset_index(drop= True) # reset index
+y_pre_train_valid = np.array(list(DataSet['train']['label'][train_index])) # reset index
 
-re_sl_train_index, re_sl_valid_index = sl_sampling(DataSet['test'].index)
+## for train
+X_sl_test = DataSet['train'][total_feat_cols].iloc[sl_test_index].reset_index(drop= True) # reset index
+y_sl_test = np.array(list(DataSet['train']['label'][sl_test_index])) # reset index
+sl_train_index = X_sl_test.index[:int(sl_sampling_rate * len(X_sl_test))]
+sl_valid_index = X_sl_test.index[int(sl_sampling_rate) * len(X_sl_test):]
 
-x_score = []
+## for retrain
+re_y_sl_test = np.zeros(len(DataSet['test']))
+re_sl_train_index = DataSet['test'].index[:int(sl_sampling_rate * len(DataSet['test']))]
+re_sl_valid_index = DataSet['test'].index[int(sl_sampling_rate) * len(DataSet['test']):]
+
+summary_cv_scores = []
+summary_sl_scores = []
+
 for s in range(times):
     params['seed'] = s
     np.random.seed(s)
     with utils.timer('train/inference'):
 
         ####### pre-train with cv #######
-        X_pre_train_valid = DataSet['train'][total_feat_cols].iloc[train_index,].reset_index(drop= True) # reset index
-        y_pre_train_valid = np.array(list(DataSet['train']['label'][train_index])) # reset index
-        X_sl_test = DataSet['train'][total_feat_cols].iloc[sl_valid_index].reset_inex(drop= True) # reset index
-        y_sl_test = np.array(list(DataSet['train']['label'][sl_valid_index])) # reset index
-
-        pre_cv_pred = sl_train(X_pre_train_valid, y_pre_train_valid, X_sl_test, y_sl_test, sl_valid_index, params, 'train')
+        pre_cv_pred, pre_cv_score, pre_sl_valid_score = sl_train(X_pre_train_valid, y_pre_train_valid, X_sl_test, y_sl_test, sl_valid_index, params, 'train')
 
         ###### post-train ##########
-        post_train_valid_index = list(train_index) + list(sl_train_index)
-        X_post_train_valid = DataSet['train'][total_feat_cols].iloc[post_train_valid_index,].reset_index(drop= True)
-        y_post_train_valid = np.array(list(DataSet['train']['label'][post_train_valid_index]))
-        y_post_train_valid[len(train_index):] = [1 if(v > 0.5) else 0 for v in pre_cv_pred[sl_train_index]] ## reset with psudo label
+        X_post_train_valid = pd.concat([X_pre_train_valid, X_sl_test.iloc[sl_train_index]], axis= 0, ignore_index= True)
+        pre_cv_pred_label = np.array([1 if(v > 0.5) else 0 for v in pre_cv_pred])
+        y_post_train_valid = np.hstack([y_pre_train_valid, pre_cv_pred_label[sl_train_index]])
 
-        post_cv_pred = sl_train(X_post_train_valid, y_post_train_valid, X_sl_test, y_sl_test, sl_valid_index, params, 'train')
-        final_cv_train += post_cv_pred
+        post_cv_pred, post_cv_score, post_sl_valid_score = sl_train(X_post_train_valid, y_post_train_valid, X_sl_test, y_sl_test, sl_valid_index, params, 'train')
+        final_cv_train[sl_test_index] += post_cv_pred
 
         ####################################### re-train #################################
-        re_y_sl_test = np.zeros(len(DataSet['test']))
 
         ######## pre-train with CV ############
-        re_pre_cv_pred = sl_train(DataSet['train'][total_feat_cols], DataSet['train']['label'], DataSet['test'][total_feat_cols], re_y_sl_test, re_sl_valid_index, params, 'test')
+        re_pre_cv_pred, re_pre_cv_score, _ = sl_train(DataSet['train'][total_feat_cols], DataSet['train']['label'], DataSet['test'][total_feat_cols], re_y_sl_test, re_sl_valid_index, params, 'test')
 
         ######## post-train ##########
-        re_X_post_train_valid = pd.concat([DataSet['train'][total_feat_cols], DataSet['test'][total_feat_cols].iloc[re_sl_train_index]], axis= 1, ignore_index= True)
-        re_pre_cv_pred_label = [1 if(v > 0.5) else 0 for v in re_pre_cv_pred]
-        re_y_post_train_valid = np.hstack([DataSet['train']['label'], re_pre_cv_pred_label[re_sl_train_index]])
+        re_X_post_train_valid = pd.concat([DataSet['train'][total_feat_cols], DataSet['test'][total_feat_cols].iloc[re_sl_train_index]], axis= 0, ignore_index= True)
+        re_pre_cv_pred_label = np.array([1 if(v > 0.5) else 0 for v in re_pre_cv_pred])
+        re_y_post_train_valid = np.hstack([np.array(DataSet['train']['label'].tolist()), re_pre_cv_pred_label[re_sl_train_index]])
 
-        re_post_cv_pred = sl_train(re_X_post_train_valid, re_y_post_train_valid, DataSet['test'][total_feat_cols], re_y_sl_test, re_sl_valid_index, params, 'test')
+        re_post_cv_pred, re_post_cv_score, _ = sl_train(re_X_post_train_valid, re_y_post_train_valid, DataSet['test'][total_feat_cols], re_y_sl_test, re_sl_valid_index, params, 'test')
         final_cv_pred += re_post_cv_pred
 
-final_score = utils.sum_weighted_tpr(DataSet['train']['label'][sl_valid_index], final_cv_train[sl_valid_index] / times)
+        summary_cv_scores.append([[pre_cv_score, post_cv_score], [re_pre_cv_score, re_post_cv_score]])
+        summary_sl_scores.append([pre_sl_valid_score, post_sl_valid_score])
+
+tmp_index = len(train_index) + int(sl_sampling_rate * len(sl_test_index))
+final_score = utils.sum_weighted_tpr(DataSet['train']['label'][tmp_index:], final_cv_train[tmp_index:] / times)
+print('\n=======================================')
 print('final cv score %.6f' % final_score)
+print('CV score: ')
+print(summary_cv_scores)
+print('Pseudo labeling on valid: ')
+print(summary_sl_scores)
+print('=======================================\n')
 
-## output
-with utils.timer("model output"):
-    OutputDir = '%s/model' % config.DataRootDir
-    if (os.path.exists(OutputDir) == False):
-        os.makedirs(OutputDir)
-    pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-    pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-
-end = time.time()
-print('\n------------------------------------')
-print('%s done, time elapsed %ss' % (strategy, int(end - start)))
-print('------------------------------------\n')
+# ## output
+# with utils.timer("model output"):
+#     OutputDir = '%s/model' % config.DataRootDir
+#     if (os.path.exists(OutputDir) == False):
+#         os.makedirs(OutputDir)
+#     pd.DataFrame({'id': DataSet['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+#     pd.DataFrame({'id': DataSet['train']['id'], 'score': final_cv_train /(1.0 * times), 'label': DataSet['train']['label']}).to_csv('%s/%s_cv_avg_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+#
+# end = time.time()
+# print('\n------------------------------------')
+# print('%s done, time elapsed %ss' % (strategy, int(end - start)))
+# print('------------------------------------\n')
