@@ -168,7 +168,7 @@ def evaltpr(preds, dtrain):
     return 'tpr', utils.sum_weighted_tpr(labels, preds), True
 
 def public_train(data, weeks, kfold):
-    times = 3
+    times = 8
     final_cv_train = np.zeros(len(data['train']))
     final_cv_pred = np.zeros(len(data['test']))
 
@@ -305,8 +305,8 @@ def public_train(data, weeks, kfold):
         OutputDir = '%s/model' % config.DataRootDir
         if (os.path.exists(OutputDir) == False):
             os.makedirs(OutputDir)
-        pd.DataFrame({'id': data['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-        pd.DataFrame({'id': data['train']['id'], 'score': final_cv_train / (1.0 * times),'label': data['train']['label']}).to_csv('%s/%s_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+        pd.DataFrame({'id': data['train']['id'], 'score': final_cv_train / (1.0 * times),'label': data['train']['label']}).to_csv('%s/%s_cv_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+        pd.DataFrame({'id': data['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_pred_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
     end = time.time()
     print('\n------------------------------------')
     print('%s done, time elapsed %ss' % (strategy, int(end - start)))
@@ -536,4 +536,5 @@ weeks = np.max(DataSet['train']['wno']) + 1
 print('Weeks %s' % weeks)
 
 ## train and evaluate with local mode
-local_train_evaluate(DataSet['train'], weeks, 4)
+#local_train_evaluate(DataSet['train'], weeks, 4)
+public_train(DataSet, weeks, 4)
