@@ -22,7 +22,7 @@ params = {
 
     #'num_iterations': 5000,
     'learning_rate': 0.01,  # !!!
-    'num_leaves': 511,
+    'num_leaves': 63,
     'max_depth': 8,  # !!!
     'scale_pos_weight': 1,
     'verbose': -10,
@@ -34,7 +34,8 @@ params = {
 }
 strategy = 'lgb_sss'
 debug = False
-sl_sampling_rate = 0.1
+pl_sampling_rate = 0.05
+pl_sample_weight = 0.25
 
 ## loading data
 cal_dtypes = {
@@ -167,168 +168,10 @@ def evaltpr(preds, dtrain):
     labels = dtrain.get_label()
     return 'tpr', utils.sum_weighted_tpr(labels, preds), True
 
-def public_train(data, weeks, kfold):
-    times = 8
-    final_cv_train = np.zeros(len(data['train']))
-    final_cv_pred = np.zeros(len(data['test']))
+def proba2label(data):
+    return [1 if(v > 0.5) else 0 for v in data]
 
-    fold_tpr_scores = np.zeros((times, weeks, kfold))
-    fold_auc_scores = np.zeros((times, weeks, kfold))
-
-    week_cv_auc_scores = np.zeros((times, weeks))
-    week_cv_tpr_scores = np.zeros((times, weeks))
-
-    #week_conf_intval = np.zeros((times, weeks, 6))
-
-    t_cv_tpr_scores = np.zeros(times)
-    t_agg_cv_tpr_scores = np.zeros(times)
-    t_cv_auc_scores = np.zeros(times)
-    t_agg_cv_auc_scores = np.zeros(times)
-
-    skf = StratifiedKFold(n_splits= kfold, random_state=None, shuffle=False)
-
-    start = time.time()
-
-    for s in range(times):
-        params['seed'] = s
-
-        cv_train = np.zeros(len(data['train']))
-        cv_pred = np.zeros(len(data['test']))
-
-        s_start = time.time()
-
-        for w in range(weeks):
-
-            best_trees = []
-
-            week_index = data['train'].index[data['train']['wno'] == w]
-            week_data = data['train'].iloc[week_index,].reset_index(drop= True)
-
-            cv_train_week = np.zeros(len(week_index))
-            cv_pred_week = np.zeros(len(data['test']))
-
-            kf = skf.split(week_data[total_feat_cols], week_data['label'])
-
-            w_start = time.time()
-            for fold, (train_index, valid_index) in enumerate(kf):
-                f_start = time.time()
-
-                X_train, X_valid = week_data[total_feat_cols].iloc[train_index,].reset_index(drop=True), week_data[total_feat_cols].iloc[valid_index,].reset_index(drop=True)
-                y_train, y_valid = week_data['label'].iloc[train_index,].reset_index(drop=True), week_data['label'].iloc[valid_index,].reset_index(drop=True)
-
-                dtrain = lightgbm.Dataset(X_train, y_train, feature_name=total_feat_cols)#, categorical_feature= date_cols)#likely_cate_cols)
-                dvalid = lightgbm.Dataset(X_valid, y_valid, reference=dtrain, feature_name=total_feat_cols)#, categorical_feature= date_cols)#likely_cate_cols)
-
-                bst = lightgbm.train(params, dtrain, num_iterations, valid_sets=dvalid, feval= evalauc, verbose_eval= 50,early_stopping_rounds= 100)
-
-                best_trees.append(bst.best_iteration)
-                ## predict with single-week model
-                cv_pred_week += bst.predict(data['test'][total_feat_cols],num_iteration=bst.best_iteration)  # * week_weight
-                cv_train_week[valid_index] += bst.predict(X_valid, num_iteration=bst.best_iteration)  # * week_weight
-
-                label_positives = np.sum(y_valid)
-                pred_positives = (np.sum([1.0 if (v > 0.5) else 0 for v in cv_train_week[valid_index]]))
-
-                tpr_score = utils.sum_weighted_tpr(y_valid, cv_train_week[valid_index])
-                auc_score = roc_auc_score(y_valid, [1 if(v > 0.5) else 0 for v in cv_train_week[valid_index]])
-
-                fold_tpr_scores[s][w][fold] = tpr_score
-                fold_auc_scores[s][w][fold] = auc_score
-
-                f_end = time.time()
-
-                print('\n---------------------------------------------------')
-                print('#%s: week %s, fold %s, score %.6f/%.6f, positives %s/%s' % (s, w, fold,
-                                                                                   tpr_score,
-                                                                                   auc_score,
-                                                                                   label_positives,
-                                                                                   pred_positives))
-                print('time elapsed %s' % int(f_end - f_start))
-                print('---------------------------------------------------\n')
-
-            w_end = time.time()
-            cv_pred_week /= kfold
-            ## aggregate cv_pred
-            cv_pred += list(cv_pred_week)
-            cv_train[week_index] = list(cv_train_week)
-
-            week_cv_tpr_score = utils.sum_weighted_tpr(week_data['label'], cv_train_week)
-            week_cv_auc_score = roc_auc_score(week_data['label'], [1 if(v > 0.5) else 0 for v in cv_train_week])
-
-            sorted_pred = np.sort(cv_pred_week, axis= None)
-            # week_conf_intval[s][w][0] = len(sorted_pred[np.where(sorted_pred > 0.8)])/len(sorted_pred)
-            # week_conf_intval[s][w][1] = len(sorted_pred[np.where(sorted_pred > 0.7)])/len(sorted_pred)
-            # week_conf_intval[s][w][2] = len(sorted_pred[np.where(sorted_pred > 0.6)])/len(sorted_pred)
-            #
-            # week_conf_intval[s][w][3] = len(sorted_pred[np.where(sorted_pred < 0.1)])/len(sorted_pred)
-            # week_conf_intval[s][w][4] = len(sorted_pred[np.where(sorted_pred < 0.05)])/len(sorted_pred)
-            # week_conf_intval[s][w][5] = len(sorted_pred[np.where(sorted_pred < 0.01)])/len(sorted_pred)
-
-            label_positives = np.sum(week_data['label'])
-            pred_positives = np.sum([1.0 if (v > 0.5) else 0 for v in cv_train_week])
-
-            week_cv_tpr_scores[s][w] = week_cv_tpr_score
-            week_cv_auc_scores[s][w] = week_cv_auc_score
-
-            # print(week_conf_intval[s][w])
-
-            print('\n------------------------------------------')
-            print('#%s, week %s, cv score %.6f/%.6f, positives %s/%s' % (s, w,
-                                                                                               week_cv_tpr_score,
-                                                                                               week_cv_auc_score,
-                                                                                               label_positives,
-                                                                                               pred_positives)
-                  )
-            print(best_trees, np.mean(best_trees))
-            print('time elapsed %s' % (int(w_end - w_start)))
-            print('------------------------------------------\n')
-        s_end = time.time()
-        ## average cv_pred by weeks
-        cv_pred /= weeks
-
-        final_cv_train += cv_train
-        final_cv_pred += cv_pred
-
-        c_cv_tpr_score = utils.sum_weighted_tpr(data['train']['label'], cv_train)
-        a_cv_tpr_score = utils.sum_weighted_tpr(data['train']['label'], final_cv_train / (s + 1.0))
-
-        c_cv_auc_score = roc_auc_score(data['train']['label'], [1 if(v > 0.5) else 0 for v in cv_train])
-        a_cv_auc_score = roc_auc_score(data['train']['label'], [1 if(v > 0.5) else 0 for v in (final_cv_train/(s + 1.0)).tolist()])
-
-        t_cv_tpr_scores[s] = c_cv_tpr_score
-        t_agg_cv_tpr_scores[s] = a_cv_tpr_score
-
-        t_cv_auc_scores[s] = c_cv_auc_score
-        t_agg_cv_auc_scores[s] = a_cv_auc_score
-
-        print('\n====================================================')
-        print('#%s: current cv score %.6f/%.6f, aggregated cv score %.6f/%.6f' % (s, c_cv_tpr_score,
-                                                                                  c_cv_auc_score,
-                                                                                  a_cv_tpr_score,
-                                                                                  a_cv_auc_score))
-        print('time elapsed %s' % (s_end - s_start))
-        print('====================================================\n')
-
-    final_score = utils.sum_weighted_tpr(data['train']['label'], final_cv_train / times)
-
-    print(t_cv_tpr_scores)
-    print(t_agg_cv_tpr_scores)
-
-    # print(week_conf_intval)
-
-    ## output
-    with utils.timer("model output"):
-        OutputDir = '%s/model' % config.DataRootDir
-        if (os.path.exists(OutputDir) == False):
-            os.makedirs(OutputDir)
-        pd.DataFrame({'id': data['train']['id'], 'score': final_cv_train / (1.0 * times),'label': data['train']['label']}).to_csv('%s/%s_cv_train_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-        pd.DataFrame({'id': data['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_cv_pred_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
-    end = time.time()
-    print('\n------------------------------------')
-    print('%s done, time elapsed %ss' % (strategy, int(end - start)))
-    print('------------------------------------\n')
-
-def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w):
+def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w, weights):
     ''''''
     best_trees = []
     cv_pred_train = np.zeros(len(train_data))
@@ -341,11 +184,12 @@ def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w):
     for fold, (train_index, valid_index) in enumerate(kf):
         X_train, X_valid = train_data[total_feat_cols].iloc[train_index,].reset_index(drop=True), train_data[total_feat_cols].iloc[valid_index,].reset_index(drop=True)
         y_train, y_valid = train_data['label'].iloc[train_index,].reset_index(drop=True), train_data['label'].iloc[valid_index,].reset_index(drop=True)
+        w_train, w_valid = weights[train_index], weights[valid_index]
 
-        dtrain = lightgbm.Dataset(X_train, y_train,feature_name=total_feat_cols)  # , categorical_feature= date_cols)#likely_cate_cols)
-        dvalid = lightgbm.Dataset(X_valid, y_valid, reference=dtrain,feature_name=total_feat_cols)  # , categorical_feature= date_cols)#likely_cate_cols)
+        dtrain = lightgbm.Dataset(X_train, y_train, weight= w_train, feature_name=total_feat_cols)  # , categorical_feature= date_cols)#likely_cate_cols)
+        dvalid = lightgbm.Dataset(X_valid, y_valid, weight= w_valid, reference=dtrain,feature_name=total_feat_cols)  # , categorical_feature= date_cols)#likely_cate_cols)
 
-        bst = lightgbm.train(cv_params, dtrain, num_iterations, valid_sets=dvalid, feval= evalauc, verbose_eval=50,early_stopping_rounds=100)
+        bst = lightgbm.train(cv_params, dtrain, num_iterations, valid_sets=dvalid, feval= evaltpr, verbose_eval=50,early_stopping_rounds=100)
         best_trees.append(bst.best_iteration)
 
         cv_pred_test += bst.predict(test_data[total_feat_cols], num_iteration=bst.best_iteration)  # * week_weight
@@ -367,8 +211,154 @@ def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w):
 
     return cv_pred_train, cv_pred_test, cv_tpr_scores, cv_auc_scores
 
-def proba2label(data):
-    return [1 if(v > 0.5) else 0 for v in data]
+def public_train(data, weeks, kfold):
+    times = 8
+    data['test']['label'] = 0
+
+    ## for final
+    pre_final_cv_train = np.zeros(len(data['train']))
+    final_cv_train = np.zeros(len(data['train']))
+    final_cv_pred = np.zeros(len(data['test']))
+
+    ## for week
+    pre_week_cv_tpr_scores = np.zeros((times, weeks))
+    week_cv_tpr_scores = np.zeros((times, weeks))
+
+    ## for times
+    pre_t_cv_tpr_scores = np.zeros(times)
+    pre_t_agg_cv_tpr_scores = np.zeros(times)
+    t_cv_tpr_scores = np.zeros(times)
+    t_agg_cv_tpr_scores = np.zeros(times)
+
+    start = time.time()
+    skf = StratifiedKFold(n_splits= kfold, random_state= None, shuffle=False)
+
+    for s in range(times):
+        params['seed'] = s
+
+        pre_cv_train = np.zeros(len(data['train']))
+        cv_train = np.zeros(len(data['train']))
+        cv_pred = np.zeros(len(data['test']))
+
+        s_start = time.time()
+
+        for w in range(weeks):
+
+            w_start = time.time()
+            week_index = data['train'].index[data['train']['wno'] == w]
+            week_data = data['train'].iloc[week_index,].reset_index(drop= True)
+
+            cv_train_week = np.zeros(len(week_index))
+            cv_pred_week = np.zeros(len(data['test']))
+
+            ## pre-train with L and sampling from U with confidence interval, U' is the output of this step
+            with utils.timer('Pre-train and PL sampling'):
+                # pre-train with CV
+                normal_weights = np.ones(len(week_data)).astype('float32')
+
+                pre_cv_train_week, pre_cv_pred_week, _, _ = train_with_cv(week_data, data['test'], kfold, skf, params, s, w, normal_weights)
+                pre_week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], pre_cv_train_week)
+
+                pl_sample_index = data['test'].index[:int(pl_sampling_rate * len(data['test']))]
+                remained_index = data['test'].index[int(pl_sampling_rate * len(data['test'])):]
+                pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop=True)
+                pl_data['label'] = np.array(proba2label(pre_cv_pred_week[pl_sample_index]))
+
+            ## re-train with L and U'
+            with utils.timer('Post-train'):
+                post_week_data = pd.concat([week_data, pl_data], axis=0, ignore_index=True)
+                post_test_data = data['test'].iloc[remained_index,].reset_index(drop=True)
+
+                # sample weight
+                pl_weights = np.array([1.0 if(i < len(week_index)) else pl_sample_weight for i in range(len(post_week_data))])
+
+                post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf,params, s, w, pl_weights)
+                cv_train_week = post_cv_train_week[:len(week_index)]
+                cv_pred_week = np.hstack([post_cv_train_week[len(week_index):], post_cv_pred_week])
+
+                assert (len(data['test']) == len(cv_pred_week))
+
+            w_end = time.time()
+            ## aggregate cv_pred
+            cv_pred += list(cv_pred_week)
+
+            pre_cv_train[week_index] = list(pre_cv_train_week)
+            cv_train[week_index] = list(cv_train_week)
+
+            week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], cv_train_week)
+            pre_week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], pre_cv_train_week)
+
+            label_positives = np.sum(week_data['label'])
+            pre_pred_positives = np.sum(proba2label(pre_cv_train_week))
+            pred_positives = np.sum(proba2label(cv_train_week))
+
+            print('\n==========================================')
+            print('#%s: week %s, original positives %s, pseudo labeled positives %s' % (s, w, np.sum(week_data['label']), np.sum(pl_data['label'])))
+            print('#%s: week %s, cv score %.6f/%.6f, positives %s/%s/%s' % (s, w, pre_week_cv_tpr_scores[s][w], week_cv_tpr_scores[s][w], label_positives, pre_pred_positives, pred_positives))
+            print('time elapsed %s' % (int(w_end - w_start)))
+            print('==========================================\n')
+        s_end = time.time()
+        ## average cv_pred by weeks
+        cv_pred /= weeks
+        final_cv_pred += cv_pred
+
+        pre_final_cv_train += pre_cv_train
+        final_cv_train += cv_train
+
+        pre_t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], pre_cv_train)
+        pre_t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], pre_final_cv_train/(s + 1.0))
+        t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], cv_train)
+        t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], final_cv_train / (s + 1.0))
+
+        print('\n====================================================')
+        print('#%s: current cv score %.6f/%.6f, aggregated cv score %.6f/%.6f' % (s, pre_t_cv_tpr_scores[s], t_cv_tpr_scores[s],pre_t_agg_cv_tpr_scores[s], t_agg_cv_tpr_scores[s]))
+        print('time elapsed %s' % (s_end - s_start))
+        print('====================================================\n')
+
+        with utils.timer("model output"):
+            OutputDir = '%s/model/%s' % (config.DataRootDir, s)
+            if (os.path.exists(OutputDir) == False):
+                os.makedirs(OutputDir)
+            pd.DataFrame({'id': data['train']['id'],
+                          'score': final_cv_train / (s + 1.0),
+                          'label': data['train']['label']}).to_csv('%s/%s_cv_train_%.6f.csv' % (OutputDir, strategy, t_cv_tpr_scores[s]), index=False)
+            pd.DataFrame({'id': data['test']['id'],
+                          'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_cv_pred_%.6f.csv' % (OutputDir, strategy, t_cv_tpr_scores[s]), index=False)
+    # final_score = t_agg_cv_tpr_scores[-1]
+
+    ## summary
+    print('\n================ week cv&eval ===============')
+    print('pre-trained week cv tpr scores:')
+    print(pre_week_cv_tpr_scores)
+    print('week cv tpr scores')
+    print(week_cv_tpr_scores)
+    print('==============================================\n')
+
+    print('\n========= time current cv&eval ===============')
+    print('pre-trained current cv tpr scores:')
+    print(pre_t_cv_tpr_scores)
+    print('current cv tpr scores')
+    print(t_cv_tpr_scores)
+    print('==============================================\n')
+
+    print('\n========= time aggregated cv&eval ============')
+    print('pre-trained aggregated time cv tpr score:')
+    print(pre_t_agg_cv_tpr_scores)
+    print('aggregated cv tpr scores')
+    print(t_agg_cv_tpr_scores)
+    print('==============================================\n')
+
+    ## output
+    # with utils.timer("model output"):
+    #     OutputDir = '%s/model' % config.DataRootDir
+    #     if (os.path.exists(OutputDir) == False):
+    #         os.makedirs(OutputDir)
+    #     pd.DataFrame({'id': data['train']['id'], 'score': final_cv_train / (1.0 * times),'label': data['train']['label']}).to_csv('%s/%s_cv_train_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+    #     pd.DataFrame({'id': data['test']['id'], 'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_cv_pred_%.6f.csv' % (OutputDir, strategy, final_score), index=False)
+    end = time.time()
+    print('\n------------------------------------')
+    print('%s done, time elapsed %ss' % (strategy, int(end - start)))
+    print('------------------------------------\n')
 
 def local_train_evaluate(data, weeks, kfold):
     ''''''
@@ -384,16 +374,20 @@ def local_train_evaluate(data, weeks, kfold):
     test_index = data.index[data['wno'] >= threshold_week]
     test_data = data.iloc[test_index,].reset_index(drop= True)
 
-    ## for summary
+    ## for week summary
+    pre_week_cv_tpr_scores = np.zeros((times, threshold_week))
+    pre_week_eval_tpr_scores = np.zeros((times, threshold_week))
+
     week_cv_auc_scores = np.zeros((times, threshold_week))
     week_cv_tpr_scores = np.zeros((times, threshold_week))
     week_eval_auc_scores = np.zeros((times, threshold_week))
     week_eval_tpr_scores = np.zeros((times, threshold_week))
 
-    pre_week_cv_tpr_scores = np.zeros((times, threshold_week))
-    pre_week_eval_tpr_scores = np.zeros((times, threshold_week))
-
-    week_conf_intval = np.zeros((times, threshold_week, 6))
+    ## for time summary
+    pre_t_cv_tpr_scores = np.zeros(times)
+    pre_t_agg_cv_tpr_scores = np.zeros(times)
+    pre_t_eval_tpr_scores = np.zeros(times)
+    pre_t_agg_eval_tpr_scores = np.zeros(times)
 
     t_cv_tpr_scores = np.zeros(times)
     t_agg_cv_tpr_scores = np.zeros(times)
@@ -404,30 +398,23 @@ def local_train_evaluate(data, weeks, kfold):
     t_eval_auc_scores = np.zeros(times)
     t_agg_eval_auc_scores = np.zeros(times)
 
-    pre_t_cv_tpr_scores = np.zeros(times)
-    pre_t_agg_cv_tpr_scores = np.zeros(times)
-    pre_t_eval_tpr_scores = np.zeros(times)
-    pre_t_agg_eval_tpr_scores = np.zeros(times)
+    ## for debug
+    week_conf_intval = np.zeros((times, threshold_week, 6))
 
-    ##
-    skf = StratifiedKFold(n_splits= kfold, random_state=None, shuffle=False)
+    skf = StratifiedKFold(n_splits= kfold, random_state= None, shuffle=False)
 
     for s in range(times):
         params['seed'] = s
 
         cv_train = np.zeros(len(data))
         cv_pred = np.zeros(len(data))
-
         pre_cv_train = np.zeros(len(data))
         pre_cv_pred = np.zeros(len(data))
 
         s_start = time.time()
-
         for w in range(threshold_week):
 
             w_start = time.time()
-
-            best_trees = []
             ## prepare labeled data for CV, L
             week_index = data.index[data['wno'] == w]
             week_data = data.iloc[week_index,].reset_index(drop= True)
@@ -435,7 +422,9 @@ def local_train_evaluate(data, weeks, kfold):
             ## pre-train with L and sampling from U with confidence interval, U' is the output of this step
             with utils.timer('Pre-train and PL sampling'):
                 # pre-train with CV
-                pre_cv_train_week, pre_cv_pred_week, _, _ = train_with_cv(week_data, test_data, kfold, skf, params, s, w)
+                normal_weights = np.ones(len(week_data)).astype('float32')
+
+                pre_cv_train_week, pre_cv_pred_week, _, _ = train_with_cv(week_data, test_data, kfold, skf, params, s, w, normal_weights)
                 pre_week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], pre_cv_train_week)
                 pre_week_eval_tpr_scores[s][w] = utils.sum_weighted_tpr(test_data['label'], pre_cv_pred_week)
                 # sampling for pseudo label, U' is the output
@@ -445,32 +434,39 @@ def local_train_evaluate(data, weeks, kfold):
                 # pl_sample_index = np.where(((pre_cv_pred_week >= up_thre) | (pre_cv_pred_week <= down_thre)))[0]
                 # remained_index = np.where((pre_cv_pred_week < up_thre) & (pre_cv_pred_week > down_thre))[0]
                 ## option 2
-                pl_sample_index = test_data.index[:int(0.1 * len(test_data))]
-                remained_index = test_data.index[int(0.1 * len(test_data)):]
+                pl_sample_index = test_data.index[:int(pl_sampling_rate * len(test_data))]
+                remained_index = test_data.index[int(pl_sampling_rate * len(test_data)):]
                 pl_data = test_data[week_data.columns].iloc[pl_sample_index,].reset_index(drop= True)
+                pl_data['label'] = np.array(proba2label(pre_cv_pred_week[pl_sample_index]))
 
             ## re-train with L and U'
             with utils.timer('Post-train'):
                 post_week_data = pd.concat([week_data, pl_data], axis= 0, ignore_index= True)
                 post_test_data = test_data.iloc[remained_index,].reset_index(drop= True)
-                post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf, params, s, w)
+
+                pl_weights = np.array([1.0 if(i < len(week_index)) else pl_sample_weight for i in range(len(post_week_data))])
+
+                post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf, params, s, w, pl_weights)
                 cv_train_week = post_cv_train_week[:len(week_index)]
                 cv_pred_week = np.hstack([post_cv_train_week[len(week_index):], post_cv_pred_week])
 
-            week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], cv_train_week)
-            week_cv_auc_scores[s][w] = roc_auc_score(week_data['label'], proba2label(cv_train_week))
+                assert (len(test_data) == len(cv_pred_week))
 
-            assert (len(test_data) == len(cv_pred_week))
-            week_eval_tpr_scores[s][w] = utils.sum_weighted_tpr(test_data['label'], cv_pred_week)
-            week_eval_auc_scores[s][w] = roc_auc_score(test_data['label'], proba2label(cv_pred_week))
-
-            w_end = time.time()
             ## aggregate cv_pred
             cv_pred[test_index] += list(cv_pred_week)
             cv_train[week_index] = list(cv_train_week)
             pre_cv_pred[test_index] += list(pre_cv_pred_week)
             pre_cv_train[week_index] = list(pre_cv_train_week)
 
+            ## cv scores
+            week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], cv_train_week)
+            week_cv_auc_scores[s][w] = roc_auc_score(week_data['label'], proba2label(cv_train_week))
+
+            ## evaluate on test
+            week_eval_tpr_scores[s][w] = utils.sum_weighted_tpr(test_data['label'], cv_pred_week)
+            week_eval_auc_scores[s][w] = roc_auc_score(test_data['label'], proba2label(cv_pred_week))
+
+            ## for debug
             label_positives = np.sum(week_data['label'])
             pred_positives = np.sum(proba2label(cv_train_week))
 
@@ -478,14 +474,15 @@ def local_train_evaluate(data, weeks, kfold):
             # week_conf_intval[s][w][0] = len(sorted_pred[np.where(sorted_pred > 0.8)])/len(sorted_pred)
             # week_conf_intval[s][w][1] = len(sorted_pred[np.where(sorted_pred > 0.7)])/len(sorted_pred)
             # week_conf_intval[s][w][2] = len(sorted_pred[np.where(sorted_pred > 0.6)])/len(sorted_pred)
-            #
             # week_conf_intval[s][w][3] = len(sorted_pred[np.where(sorted_pred < 0.1)])/len(sorted_pred)
             # week_conf_intval[s][w][4] = len(sorted_pred[np.where(sorted_pred < 0.05)])/len(sorted_pred)
             # week_conf_intval[s][w][5] = len(sorted_pred[np.where(sorted_pred < 0.01)])/len(sorted_pred)
-            #
-            # print(week_conf_intval[s][w])
+
+            w_end = time.time()
 
             print('\n===========================================')
+            print('#%s: week %s, original positives %s, pseudo labeled positives %s' % (s, w, np.sum(week_data['label']), np.sum(pl_data['label'])))
+            print('---------------------------------------------')
             print('#%s: week %s, cv score %.6f, eval score %.6f' % (s, w, pre_week_cv_tpr_scores[s][w], pre_week_eval_tpr_scores[s][w]))
             print('---------------------------------------------')
             print('#%s: week %s, cv score %.6f/%.6f, eval score %.6f/%.6f, positives %s/%s' % (s, w,
@@ -496,95 +493,83 @@ def local_train_evaluate(data, weeks, kfold):
             print('time elapsed %s' % (int(w_end - w_start)))
             print('===========================================\n')
 
-        s_end = time.time()
-        ## average cv_pred by weeks
         cv_pred /= threshold_week
         pre_cv_pred /= threshold_week
 
+        ## aggregate
         final_cv_train += cv_train
         final_cv_pred += cv_pred
         pre_final_cv_train += pre_cv_train
         pre_final_cv_pred += pre_cv_pred
 
-        c_cv_tpr_score = utils.sum_weighted_tpr(data['label'].iloc[train_valid_index,], cv_train[train_valid_index])
-        a_cv_tpr_score = utils.sum_weighted_tpr(data['label'].iloc[train_valid_index,], final_cv_train[train_valid_index] / (s + 1.0))
-        c_eval_tpr_score = utils.sum_weighted_tpr(data['label'].iloc[test_index,], cv_pred[test_index])
-        a_eval_tpr_score = utils.sum_weighted_tpr(data['label'].iloc[test_index,], final_cv_pred[test_index]/(s + 1.0))
-
-        c_cv_auc_score = roc_auc_score(data['label'].iloc[train_valid_index,], [1 if(v > 0.5) else 0 for v in cv_train[train_valid_index]])
-        a_cv_auc_score = roc_auc_score(data['label'].iloc[train_valid_index,], [1 if(v > 0.5) else 0 for v in (final_cv_train[train_valid_index]/(s + 1.0)).tolist()])
-        c_eval_auc_score = roc_auc_score(data['label'].iloc[test_index,], [1 if(v > 0.5) else 0 for v in cv_pred[test_index]])
-        a_eval_auc_score = roc_auc_score(data['label'].iloc[test_index,], [1 if(v > 0.5) else 0 for v in (final_cv_pred[test_index]/(s + 1.0)).tolist()])
-
-        t_cv_tpr_scores[s] = c_cv_tpr_score
-        t_agg_cv_tpr_scores[s] = a_cv_tpr_score
-        t_eval_tpr_scores[s] = c_eval_tpr_score
-        t_agg_eval_tpr_scores[s] = a_eval_tpr_score
-
-        t_cv_auc_scores[s] = c_cv_auc_score
-        t_agg_cv_auc_scores[s] = a_cv_auc_score
-        t_eval_auc_scores[s] = c_eval_auc_score
-        t_agg_eval_auc_scores[s] = a_eval_auc_score
-
+        ## pre-trained tpr scores
         pre_t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[train_valid_index,], pre_cv_train[train_valid_index])
-        pre_t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[train_valid_index,], pre_final_cv_train[train_valid_index] / (s + 1.0))
+        pre_t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[train_valid_index,], pre_final_cv_train[train_valid_index])
         pre_t_eval_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[test_index,], pre_cv_pred[test_index])
-        pre_t_agg_eval_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[test_index,], pre_final_cv_pred[test_index] / (s + 1.0))
+        pre_t_agg_eval_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[test_index,], pre_final_cv_pred[test_index])
 
+        ## (post-trained) tpr scores
+        t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[train_valid_index,], cv_train[train_valid_index])
+        t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[train_valid_index,], final_cv_train[train_valid_index] / (s + 1.0))
+        t_eval_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[test_index,], cv_pred[test_index])
+        t_agg_eval_tpr_scores[s] = utils.sum_weighted_tpr(data['label'].iloc[test_index,], final_cv_pred[test_index]/(s + 1.0))
+
+        ## (post-trained) auc scores
+        t_cv_auc_scores[s] = roc_auc_score(data['label'].iloc[train_valid_index,], proba2label(cv_train[train_valid_index]))
+        t_agg_cv_auc_scores[s] = roc_auc_score(data['label'].iloc[train_valid_index,], proba2label(final_cv_train[train_valid_index]/(s + 1.0)))
+        t_eval_auc_scores[s] = roc_auc_score(data['label'].iloc[test_index,], proba2label(cv_pred[test_index]))
+        t_agg_eval_auc_scores[s] = roc_auc_score(data['label'].iloc[test_index,], proba2label(final_cv_pred[test_index]/(s + 1.0)))
+
+        s_end = time.time()
         print('\n====================================================')
         print('#%s: current cv score %.6f, aggregated cv score %.6f' % (s, pre_t_cv_tpr_scores[s], pre_t_agg_cv_tpr_scores[s]))
         print('#%s: current eval score %.6f, aggregated eval score %.6f' % (s, pre_t_eval_tpr_scores[s], pre_t_agg_eval_tpr_scores[s]))
         print('-------------------------------------------------------')
-        print('#%s: current cv score %.6f/%.6f, aggregated cv score %.6f/%.6f' % (s, c_cv_tpr_score,
-                                                                                  c_cv_auc_score,
-                                                                                  a_cv_tpr_score,
-                                                                                  a_cv_auc_score))
-        print('#%s: current eval score %.6f/%.6f, aggregated eval score %.6f/%.6f' % (s, c_eval_tpr_score,
-                                                                                      c_eval_auc_score,
-                                                                                      a_eval_tpr_score,
-                                                                                      a_eval_auc_score))
+        print('#%s: current cv score %.6f/%.6f, aggregated cv score %.6f/%.6f' % (s,
+                                                                                  t_cv_tpr_scores[s],t_cv_auc_scores[s],
+                                                                                  t_agg_cv_tpr_scores[s],t_agg_cv_auc_scores[s]))
+        print('#%s: current eval score %.6f/%.6f, aggregated eval score %.6f/%.6f' % (s,
+                                                                                      t_eval_tpr_scores[s],t_eval_auc_scores[s],
+                                                                                      t_agg_eval_tpr_scores[s],t_agg_eval_auc_scores[s]))
         print('time elapsed %s' % (s_end - s_start))
         print('====================================================\n')
 
     ## summary
-    print('\nweek cv tpr scores')
+    print('\n================ week cv&eval ===============')
+    print('pre-trained week cv tpr scores:')
     print(pre_week_cv_tpr_scores)
-    print('----------------------')
+    print('week cv tpr scores')
     print(week_cv_tpr_scores)
-    print('\nweek cv auc scores')
-    print(week_cv_auc_scores)
-    print('\nweek eval tpr scores')
-    print(pre_week_eval_tpr_scores)
-    print('-----------------------')
-    print(week_eval_tpr_scores)
-    print('\nweek eval auc scores')
-    print(week_eval_auc_scores)
-    print('\n----------------------')
-    print('current cv tpr scores')
-    print(pre_t_cv_tpr_scores)
-    print('----------------------')
-    print(t_cv_tpr_scores)
-    print('current cv auc scores')
-    print(t_cv_auc_scores)
-    print('aggregated cv tpr scores')
-    print(pre_t_agg_cv_tpr_scores)
     print('-------------------------')
-    print(t_agg_cv_tpr_scores)
-    print('aggregated cv auc scores')
-    print(t_agg_cv_auc_scores)
-    print('\n----------------------')
-    print('current eval tpr scores')
+    print('pre-trained week eval tpr scores:')
+    print(pre_week_eval_tpr_scores)
+    print('week eval tpr scores')
+    print(week_eval_tpr_scores)
+    print('==============================================\n')
+
+    print('\n========= time current cv&eval ===============')
+    print('pre-trained current cv tpr scores:')
+    print(pre_t_cv_tpr_scores)
+    print('current cv tpr scores')
+    print(t_cv_tpr_scores)
+    print('---------------------------')
+    print('pre-trained current eval tpr scores:')
     print(pre_t_eval_tpr_scores)
-    print('---------------------------')
+    print('current eval tpr scores')
     print(t_eval_tpr_scores)
-    print('current eval auc scores')
-    print(t_eval_auc_scores)
-    print('aggregated eval tpr scores')
+    print('==============================================\n')
+
+    print('\n========= time aggregated cv&eval ============')
+    print('pre-trained aggregated time cv tpr score:')
+    print(pre_t_agg_cv_tpr_scores)
+    print('aggregated cv tpr scores')
+    print(t_agg_cv_tpr_scores)
+    print('-------------------------')
+    print('pre-trained aggregated time eval tpr score:')
     print(pre_t_agg_eval_tpr_scores)
-    print('---------------------------')
+    print('aggregated eval tpr scores')
     print(t_agg_eval_tpr_scores)
-    print('\naggregated eval auc scores')
-    print(t_agg_eval_auc_scores)
+    print('==============================================\n')
 
 ## total weeks
 weeks = np.max(DataSet['train']['wno']) + 1
