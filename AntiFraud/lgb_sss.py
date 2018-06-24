@@ -22,7 +22,7 @@ params = {
 
     #'num_iterations': 5000,
     'learning_rate': 0.01,  # !!!
-    'num_leaves': 63,
+    'num_leaves': 255,
     'max_depth': 8,  # !!!
     'scale_pos_weight': 1,
     'verbose': -10,
@@ -34,8 +34,8 @@ params = {
 }
 strategy = 'lgb_sss'
 debug = False
-pl_sampling_rate = 0.05
-pl_sample_weight = 0.25
+pl_sampling_rate = 0.01
+pl_sample_weight = 1.0
 
 ## loading data
 cal_dtypes = {
@@ -259,6 +259,12 @@ def public_train(data, weeks, kfold):
                 pre_cv_train_week, pre_cv_pred_week, _, _ = train_with_cv(week_data, data['test'], kfold, skf, params, s, w, normal_weights)
                 pre_week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], pre_cv_train_week)
 
+                ## option 1
+                # sorted_preds = np.sort(pre_cv_pred_week, axis=None)
+                # down_thre, up_thre = sorted_preds[:int((pl_sampling_rate * 0.983) * len(sorted_preds))][-1], sorted_preds[-int((pl_sampling_rate * 0.012) * len(sorted_preds)):][0]
+                # pl_sample_index = np.where(((pre_cv_pred_week >= up_thre) | (pre_cv_pred_week <= down_thre)))[0]
+                # remained_index = np.where((pre_cv_pred_week < up_thre) & (pre_cv_pred_week > down_thre))[0]
+                ## option 2
                 pl_sample_index = data['test'].index[:int(pl_sampling_rate * len(data['test']))]
                 remained_index = data['test'].index[int(pl_sampling_rate * len(data['test'])):]
                 pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop=True)
@@ -289,12 +295,16 @@ def public_train(data, weeks, kfold):
             pre_week_cv_tpr_scores[s][w] = utils.sum_weighted_tpr(week_data['label'], pre_cv_train_week)
 
             label_positives = np.sum(week_data['label'])
-            pre_pred_positives = np.sum(proba2label(pre_cv_train_week))
-            pred_positives = np.sum(proba2label(cv_train_week))
+            pre_train_positives = np.sum(proba2label(pre_cv_train_week))
+            train_positives = np.sum(proba2label(cv_train_week))
+            pred_positives = np.sum(proba2label(cv_pred))
 
             print('\n==========================================')
             print('#%s: week %s, original positives %s, pseudo labeled positives %s' % (s, w, np.sum(week_data['label']), np.sum(pl_data['label'])))
-            print('#%s: week %s, cv score %.6f/%.6f, positives %s/%s/%s' % (s, w, pre_week_cv_tpr_scores[s][w], week_cv_tpr_scores[s][w], label_positives, pre_pred_positives, pred_positives))
+            print('#%s: week %s, cv score %.6f/%.6f, train positives %s/%s/%s, predict positives %s' % (s, w,
+                                                                                                        pre_week_cv_tpr_scores[s][w], week_cv_tpr_scores[s][w],
+                                                                                                        label_positives, pre_train_positives, train_positives,
+                                                                                                        pred_positives))
             print('time elapsed %s' % (int(w_end - w_start)))
             print('==========================================\n')
         s_end = time.time()
@@ -310,8 +320,17 @@ def public_train(data, weeks, kfold):
         t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], cv_train)
         t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], final_cv_train / (s + 1.0))
 
+        label_positives = np.sum(data['train']['label'])
+        pre_train_positives = np.sum(proba2label(pre_cv_train))
+        train_positives = np.sum(proba2label(cv_train))
+        pred_positives = np.sum(proba2label(cv_pred))
+
         print('\n====================================================')
-        print('#%s: current cv score %.6f/%.6f, aggregated cv score %.6f/%.6f' % (s, pre_t_cv_tpr_scores[s], t_cv_tpr_scores[s],pre_t_agg_cv_tpr_scores[s], t_agg_cv_tpr_scores[s]))
+        print('#%s: current cv score %.6f/%.6f, aggregated cv score %.6f/%.6f, train positives %s/%s/%s, predict positives %s' % (s,
+                                                                                                                                  pre_t_cv_tpr_scores[s], t_cv_tpr_scores[s],
+                                                                                                                                  pre_t_agg_cv_tpr_scores[s], t_agg_cv_tpr_scores[s],
+                                                                                                                                  label_positives, pre_train_positives, train_positives,
+                                                                                                                                  pred_positives))
         print('time elapsed %s' % (s_end - s_start))
         print('====================================================\n')
 
@@ -321,9 +340,9 @@ def public_train(data, weeks, kfold):
                 os.makedirs(OutputDir)
             pd.DataFrame({'id': data['train']['id'],
                           'score': final_cv_train / (s + 1.0),
-                          'label': data['train']['label']}).to_csv('%s/%s_cv_train_%.6f.csv' % (OutputDir, strategy, t_cv_tpr_scores[s]), index=False)
+                          'label': data['train']['label']}).to_csv('%s/%s_cv_train_%.6f.csv' % (OutputDir, strategy, t_agg_cv_tpr_scores[s]), index=False)
             pd.DataFrame({'id': data['test']['id'],
-                          'score': final_cv_pred / (1.0 * times)}).to_csv('%s/%s_cv_pred_%.6f.csv' % (OutputDir, strategy, t_cv_tpr_scores[s]), index=False)
+                          'score': final_cv_pred / (s + 1.0)}).to_csv('%s/%s_cv_pred_%.6f.csv' % (OutputDir, strategy, t_agg_cv_tpr_scores[s]), index=False)
     # final_score = t_agg_cv_tpr_scores[-1]
 
     ## summary
