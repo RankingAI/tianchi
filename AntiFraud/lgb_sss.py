@@ -279,7 +279,6 @@ def public_train(data, weeks, kfold):
 
     for s in range(times):
         params['seed'] = s
-        skf = StratifiedKFold(n_splits= kfold, random_state= 2018 + s, shuffle=False)
 
         pre_cv_train = np.zeros(len(data['train']))
         pre_cv_pred = np.zeros(len(data['test']))
@@ -289,6 +288,8 @@ def public_train(data, weeks, kfold):
         s_start = time.time()
 
         for w in range(weeks):
+
+            skf = StratifiedKFold(n_splits= kfold, random_state= 2018 * s + w, shuffle=False)
 
             w_start = time.time()
             week_index = data['train'].index[(data['train']['wno'] == w) & (data['train']['label'] != -1)]
@@ -336,7 +337,9 @@ def public_train(data, weeks, kfold):
 
                 post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf,params, s, w, pl_weights)
                 cv_train_week = post_cv_train_week[:len(week_index)]
-                cv_pred_week = np.hstack([post_cv_train_week[len(week_index):], post_cv_pred_week])
+                cv_pred_week[pl_sample_index] = list(post_cv_train_week[len(week_index):])
+                cv_pred_week[remained_index] = list(post_cv_pred_week)
+                # cv_pred_week = np.hstack([post_cv_train_week[len(week_index):], post_cv_pred_week])
 
                 assert (len(data['test']) == len(cv_pred_week))
 
@@ -378,8 +381,8 @@ def public_train(data, weeks, kfold):
             print('==========================================\n')
         s_end = time.time()
         ## average cv_pred by weeks
-        cv_pred /= weeks
         pre_cv_pred /= weeks
+        cv_pred /= weeks
         pre_final_cv_pred += pre_cv_pred
         final_cv_pred += cv_pred
 
