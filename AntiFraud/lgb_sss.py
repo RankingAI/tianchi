@@ -32,10 +32,10 @@ params = {
 
     'max_bin': 255,
 }
-strategy = 'lgb_sss'
+strategy = 'lgb_sss_te'
 debug = False
 pl_sampling_rate = 0.05
-pl_sample_weight = 0.25
+pl_sample_weight = 0.01
 
 ## loading data
 cal_dtypes = {
@@ -276,10 +276,10 @@ def public_train(data, weeks, kfold):
     t_agg_cv_tpr_scores = np.zeros(times)
 
     start = time.time()
-    skf = StratifiedKFold(n_splits= kfold, random_state= None, shuffle=False)
 
     for s in range(times):
         params['seed'] = s
+        skf = StratifiedKFold(n_splits= kfold, random_state= 2018 + s, shuffle=False)
 
         pre_cv_train = np.zeros(len(data['train']))
         pre_cv_pred = np.zeros(len(data['test']))
@@ -291,8 +291,8 @@ def public_train(data, weeks, kfold):
         for w in range(weeks):
 
             w_start = time.time()
-            week_index = data['train'].index[(data['train']['wno'] == w) & (data['label'] != -1)]
-            week_index_ul = data['train'].index[(data['train']['wno'] == w) & (data['label'] == -1)]
+            week_index = data['train'].index[(data['train']['wno'] == w) & (data['train']['label'] != -1)]
+            week_index_ul = data['train'].index[(data['train']['wno'] == w) & (data['train']['label'] == -1)]
             week_data = data['train'].iloc[week_index,].reset_index(drop= True)
             week_data_ul = data['train'].iloc[week_index_ul,].reset_index(drop= True)
 
@@ -303,47 +303,53 @@ def public_train(data, weeks, kfold):
             with utils.timer('Pre-train and PL sampling'):
                 # pre-train with CV
                 normal_weights = np.ones(len(week_data)).astype('float32')
-                pre_cv_train_week, pre_cv_pred_week, pre_cv_unlabeled_week, _, _ = train_with_cv_1(week_data, data['test'], week_data_ul, kfold, skf, params, s, w, normal_weights)
+                pre_cv_train_week, pre_cv_pred_week, _, _ = train_with_cv(week_data, data['test'], kfold, skf, params, s, w, normal_weights)
+                # pre_cv_train_week, pre_cv_pred_week, pre_cv_unlabeled_week, _, _ = train_with_cv_1(week_data, data['test'], week_data_ul, kfold, skf, params, s, w, normal_weights)
                 ####
                 # cv_pred_week = pre_cv_pred_week
                 # cv_train_week = pre_cv_train_week
 
-                ## pseudo label option1: sample from test data set
+                # pseudo label option1: sample from test data set
+                sorted_preds = np.sort(pre_cv_pred_week, axis= None)
+                down_thre, up_thre = sorted_preds[:int(0.983 * pl_sampling_rate * 0.5 * len(sorted_preds))][-1], sorted_preds[-int(0.012 * pl_sampling_rate * 0.5 * len(sorted_preds)):][0]
+                print(down_thre, up_thre)
+                pl_sample_index = np.where((pre_cv_pred_week >= up_thre) | (pre_cv_pred_week <= down_thre))[0]
+                remained_index = np.where((pre_cv_pred_week < up_thre) & (pre_cv_pred_week > down_thre))[0]
                 # pl_sample_index = data['test'].index[:int(pl_sampling_rate * len(data['test']))]
                 # remained_index = data['test'].index[int(pl_sampling_rate * len(data['test'])):]
-                # pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop=True)
-                # pl_data['label'] = np.array(proba2label(pre_cv_pred_week[pl_sample_index]))
+                pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop=True)
+                pl_data['label'] = np.array(proba2label(pre_cv_pred_week[pl_sample_index]))
 
-                ## pseudo label option2: sample from the unlabled data set
-                pl_data = week_data_ul
-                pl_data['label'] = np.array(proba2label(pre_cv_unlabeled_week))
+                # ## pseudo label option2: sample from the unlabled data set
+                # pl_data = week_data_ul
+                # pl_data['label'] = np.array(proba2label(pre_cv_unlabeled_week))
 
             # ## re-train with L and U'
 
             ## pseudo label option1
-            # with utils.timer('Post-train'):
-            #     post_week_data = pd.concat([week_data, pl_data], axis=0, ignore_index=True)
-            #     post_test_data = data['test'].iloc[remained_index,].reset_index(drop=True)
-            #
-            #     # sample weight
-            #     pl_weights = np.array([1.0 if(i < len(week_index)) else pl_sample_weight for i in range(len(post_week_data))])
-            #
-            #     post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf,params, s, w, pl_weights)
-            #     cv_train_week = post_cv_train_week[:len(week_index)]
-            #     cv_pred_week = np.hstack([post_cv_train_week[len(week_index):], post_cv_pred_week])
-            #
-            #     assert (len(data['test']) == len(cv_pred_week))
-
-            ## pseudo label option2
             with utils.timer('Post-train'):
                 post_week_data = pd.concat([week_data, pl_data], axis=0, ignore_index=True)
+                post_test_data = data['test'].iloc[remained_index,].reset_index(drop=True)
 
                 # sample weight
                 pl_weights = np.array([1.0 if(i < len(week_index)) else pl_sample_weight for i in range(len(post_week_data))])
 
-                post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, data['test'], kfold, skf,params, s, w, pl_weights)
+                post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf,params, s, w, pl_weights)
                 cv_train_week = post_cv_train_week[:len(week_index)]
-                cv_pred_week = post_cv_pred_week
+                cv_pred_week = np.hstack([post_cv_train_week[len(week_index):], post_cv_pred_week])
+
+                assert (len(data['test']) == len(cv_pred_week))
+
+            # ## pseudo label option2
+            # with utils.timer('Post-train'):
+            #     post_week_data = pd.concat([week_data, pl_data], axis=0, ignore_index=True)
+            #
+            #     # sample weight
+            #     pl_weights = np.array([1.0 if(i < len(week_index)) else pl_sample_weight for i in range(len(post_week_data))])
+            #
+            #     post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, data['test'], kfold, skf,params, s, w, pl_weights)
+            #     cv_train_week = post_cv_train_week[:len(week_index)]
+            #     cv_pred_week = post_cv_pred_week
 
             w_end = time.time()
             ## aggregate cv_pred
@@ -373,16 +379,19 @@ def public_train(data, weeks, kfold):
         s_end = time.time()
         ## average cv_pred by weeks
         cv_pred /= weeks
+        pre_cv_pred /= weeks
         pre_final_cv_pred += pre_cv_pred
         final_cv_pred += cv_pred
 
         pre_final_cv_train += pre_cv_train
         final_cv_train += cv_train
 
-        pre_t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], pre_cv_train)
-        pre_t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], pre_final_cv_train/(s + 1.0))
-        t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], cv_train)
-        t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'], final_cv_train / (s + 1.0))
+        labeled_index = data['train'].index[data['train']['label'] != -1]
+
+        pre_t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'].iloc[labeled_index,], pre_cv_train[labeled_index])
+        pre_t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'].iloc[labeled_index,], pre_final_cv_train[labeled_index]/(s + 1.0))
+        t_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'].iloc[labeled_index,], cv_train[labeled_index])
+        t_agg_cv_tpr_scores[s] = utils.sum_weighted_tpr(data['train']['label'].iloc[labeled_index,], final_cv_train[labeled_index] / (s + 1.0))
 
         pre_test_positives = np.sum(proba2label(pre_final_cv_pred/(s + 1.0)))
         test_positives = np.sum(proba2label(final_cv_pred/(s + 1.0)))
