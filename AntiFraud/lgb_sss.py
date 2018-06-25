@@ -36,6 +36,8 @@ strategy = 'lgb_sss_te'
 debug = False
 pl_sampling_rate = 0.05
 pl_sample_weight = 0.01
+pl_sampling_times = 4
+train_times = 12
 
 ## loading data
 cal_dtypes = {
@@ -144,6 +146,7 @@ print('=======================\n')
 raw_cols = [c for c in DataSet['train'].columns if(c.startswith('f'))]
 date_cols = [c for c in DataSet['train'].columns if(c.startswith('date_'))]
 drop_cols = ["f24", "f26", "f27", "f28", "f29", "f30", "f31", "f34", "f52", "f53", "f54", "f58"]
+             #'f36', 'f37', 'f38', 'f39', 'f40', 'f41', 'f42', 'f43', 'f44', 'f45', 'f46', 'f47']
 #drop_cols = [c for c in date_cols if(c in ['date_hol_days', 'date_dow'])]
 raw_cols = [c for c in raw_cols if(c not in drop_cols)]
 total_feat_cols = raw_cols# + date_cols
@@ -156,10 +159,21 @@ total_feat_cols = raw_cols# + date_cols
 
 ## likely categorical features
 entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]],axis=0).reset_index(drop=True)
+null_counts = (entire_data[raw_cols].isnull().sum(axis= 0) / len(entire_data)).to_dict()
+medians = entire_data[raw_cols].median(axis= 0)
+means = entire_data[raw_cols].mean(axis= 0)
 likely_cate_cols = []
 for c in raw_cols:
     if(len(entire_data[c].value_counts()) <= 10):
         likely_cate_cols.append(c)
+# for c in raw_cols:
+#     for mod in ['train', 'test']:
+#         if(null_counts[c] < 0.1):
+#             DataSet[mod][c].fillna(-1, inplace= True)
+#         elif(null_counts[c] < 0.5):
+#             DataSet[mod][c].fillna(medians[c], inplace= True)
+#         else:
+#             DataSet[mod][c].fillna(means[c], inplace= True)
 
 def evalauc(preds, dtrain):
     labels = dtrain.get_label()
@@ -242,8 +256,8 @@ def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w, weights):
         label_positives = np.sum(y_valid)
         pred_positives = (np.sum([1.0 if (v > 0.5) else 0 for v in cv_pred_train[valid_index]]))
 
-        cv_tpr_scores[fold] = utils.sum_weighted_tpr(y_valid, cv_pred_train[valid_index])
-        cv_auc_scores[fold] = roc_auc_score(y_valid, [1 if (v > 0.5) else 0 for v in cv_pred_train[valid_index]])
+        #cv_tpr_scores[fold] = utils.sum_weighted_tpr(y_valid, cv_pred_train[valid_index])
+        #cv_auc_scores[fold] = roc_auc_score(y_valid, [1 if (v > 0.5) else 0 for v in cv_pred_train[valid_index]])
 
         print('\n---------------------------------------------------')
         print('#%s: week %s, fold %s, score %.6f/%.6f, positives %s/%s' % (s, w, fold,
@@ -255,8 +269,17 @@ def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w, weights):
 
     return cv_pred_train, cv_pred_test, cv_tpr_scores, cv_auc_scores
 
+def pseudo_label_sampling(proba_array, sample_rate, pos_ratio, neg_ratio):
+    sorted_preds = np.sort(proba_array, axis=None)
+    down_thre, up_thre = sorted_preds[:int(0.983 * sample_rate * neg_ratio * len(sorted_preds))][-1], sorted_preds[-int(0.012 * sample_rate * pos_ratio * len(sorted_preds)):][0]
+    pl_sample_index = np.where((proba_array >= up_thre) | (proba_array <= down_thre))[0]
+    remained_index = np.where((proba_array < up_thre) & (proba_array > down_thre))[0]
+
+    print(down_thre, up_thre)
+
+    return pl_sample_index, remained_index
+
 def public_train(data, weeks, kfold):
-    times = 8
     data['test']['label'] = 0
 
     ## for final
@@ -266,18 +289,18 @@ def public_train(data, weeks, kfold):
     final_cv_pred = np.zeros(len(data['test']))
 
     ## for week
-    pre_week_cv_tpr_scores = np.zeros((times, weeks))
-    week_cv_tpr_scores = np.zeros((times, weeks))
+    pre_week_cv_tpr_scores = np.zeros((train_times, weeks))
+    week_cv_tpr_scores = np.zeros((train_times, weeks))
 
-    ## for times
-    pre_t_cv_tpr_scores = np.zeros(times)
-    pre_t_agg_cv_tpr_scores = np.zeros(times)
-    t_cv_tpr_scores = np.zeros(times)
-    t_agg_cv_tpr_scores = np.zeros(times)
+    ## for train_times
+    pre_t_cv_tpr_scores = np.zeros(train_times)
+    pre_t_agg_cv_tpr_scores = np.zeros(train_times)
+    t_cv_tpr_scores = np.zeros(train_times)
+    t_agg_cv_tpr_scores = np.zeros(train_times)
 
     start = time.time()
 
-    for s in range(times):
+    for s in range(train_times):
         params['seed'] = s
 
         pre_cv_train = np.zeros(len(data['train']))
@@ -311,11 +334,8 @@ def public_train(data, weeks, kfold):
                 # cv_train_week = pre_cv_train_week
 
                 # pseudo label option1: sample from test data set
-                sorted_preds = np.sort(pre_cv_pred_week, axis= None)
-                down_thre, up_thre = sorted_preds[:int(0.983 * pl_sampling_rate * 0.5 * len(sorted_preds))][-1], sorted_preds[-int(0.012 * pl_sampling_rate * 0.5 * len(sorted_preds)):][0]
-                print(down_thre, up_thre)
-                pl_sample_index = np.where((pre_cv_pred_week >= up_thre) | (pre_cv_pred_week <= down_thre))[0]
-                remained_index = np.where((pre_cv_pred_week < up_thre) & (pre_cv_pred_week > down_thre))[0]
+                pl_sample_index, remained_index = pseudo_label_sampling(pre_cv_pred_week, pl_sampling_rate, 0.75, 0.25)
+
                 # pl_sample_index = data['test'].index[:int(pl_sampling_rate * len(data['test']))]
                 # remained_index = data['test'].index[int(pl_sampling_rate * len(data['test'])):]
                 pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop=True)
@@ -326,22 +346,40 @@ def public_train(data, weeks, kfold):
                 # pl_data['label'] = np.array(proba2label(pre_cv_unlabeled_week))
 
             # ## re-train with L and U'
-
+            # for debug
+            pl_iter_cv_train = np.zeros(pl_sampling_times)
+            pl_iter_positives_pred = np.zeros(pl_sampling_times)
             ## pseudo label option1
             with utils.timer('Post-train'):
-                post_week_data = pd.concat([week_data, pl_data], axis=0, ignore_index=True)
-                post_test_data = data['test'].iloc[remained_index,].reset_index(drop=True)
+                for it in range(pl_sampling_times):
+                    post_week_data = pd.concat([week_data, pl_data], axis=0, ignore_index=True)
+                    post_test_data = data['test'].iloc[remained_index,].reset_index(drop=True)
 
-                # sample weight
-                pl_weights = np.array([1.0 if(i < len(week_index)) else pl_sample_weight for i in range(len(post_week_data))])
+                    # sample weight
+                    pl_weights = np.array([1.0 if(i < len(week_index)) else pl_sample_weight for i in range(len(post_week_data))])
 
-                post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf,params, s, w, pl_weights)
-                cv_train_week = post_cv_train_week[:len(week_index)]
-                cv_pred_week[pl_sample_index] = list(post_cv_train_week[len(week_index):])
-                cv_pred_week[remained_index] = list(post_cv_pred_week)
-                # cv_pred_week = np.hstack([post_cv_train_week[len(week_index):], post_cv_pred_week])
+                    post_cv_train_week, post_cv_pred_week, _, _ = train_with_cv(post_week_data, post_test_data, kfold, skf,params, s, w, pl_weights)
+                    cv_train_week = post_cv_train_week[:len(week_index)]
+                    cv_pred_week[pl_sample_index] = list(post_cv_train_week[len(week_index):])
+                    cv_pred_week[remained_index] = list(post_cv_pred_week)
 
-                assert (len(data['test']) == len(cv_pred_week))
+                    assert (len(data['test']) == len(cv_pred_week))
+
+                    pl_iter_cv_train[it] = utils.sum_weighted_tpr(week_data['label'], cv_train_week)
+                    pl_iter_positives_pred[it] = np.sum(proba2label(cv_pred_week))
+
+                    # update pl_data
+                    if(it < pl_sampling_times - 1):
+                        pl_sample_index, remained_index = pseudo_label_sampling(cv_pred_week, pl_sampling_rate, 0.75, 0.25)
+                        pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop= True)
+                        pl_data['label'] = np.array(proba2label(pre_cv_pred_week[pl_sample_index]))
+
+            print('\n==============================')
+            print('pseudo labeling with iterative mode, cv on train:')
+            print(pl_iter_cv_train.tolist())
+            print('pseudo labeling with iterative mode, positives on test:')
+            print(pl_iter_positives_pred)
+            print('==============================\n')
 
             # ## pseudo label option2
             # with utils.timer('Post-train'):
