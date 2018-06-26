@@ -9,6 +9,7 @@ import utils
 from sklearn.model_selection import StratifiedKFold
 import lightgbm
 from sklearn.metrics import roc_auc_score
+import gc
 
 sys.path.append("..")
 pd.set_option('display.max_rows', None)
@@ -148,6 +149,8 @@ entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]],
 null_counts = (entire_data[raw_cols].isnull().sum(axis= 0) / len(entire_data)).to_dict()
 drop_cols = [c for c in null_counts.keys() if(null_counts[c] > 0.35)]
 date_cols = [c for c in DataSet['train'].columns if(c.startswith('date_'))]
+del entire_data
+gc.collect()
 # drop_cols = ["f24", "f26", "f27", "f28", "f29", "f30", "f31", "f34", "f52", "f53", "f54", "f58"]
 # drop_cols = ["f34","f54","f58","f106","f81","f99","f28","f29","f30","f31","f24","f25","f26","f27","f21","f52","f53"]
              #'f36', 'f37', 'f38', 'f39', 'f40', 'f41', 'f42', 'f43', 'f44', 'f45', 'f46', 'f47']
