@@ -35,7 +35,7 @@ params = {
 strategy = 'lgb_sss_te'
 debug = False
 pl_sampling_rate = 0.05
-pl_sample_weight = 0.01
+pl_sample_weight = 0.05
 pl_sampling_times = 4
 train_times = 12
 
@@ -256,8 +256,8 @@ def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w, weights):
         label_positives = np.sum(y_valid)
         pred_positives = (np.sum([1.0 if (v > 0.5) else 0 for v in cv_pred_train[valid_index]]))
 
-        #cv_tpr_scores[fold] = utils.sum_weighted_tpr(y_valid, cv_pred_train[valid_index])
-        #cv_auc_scores[fold] = roc_auc_score(y_valid, [1 if (v > 0.5) else 0 for v in cv_pred_train[valid_index]])
+        cv_tpr_scores[fold] = utils.sum_weighted_tpr(y_valid, cv_pred_train[valid_index])
+        cv_auc_scores[fold] = roc_auc_score(y_valid, [1 if (v > 0.5) else 0 for v in cv_pred_train[valid_index]])
 
         print('\n---------------------------------------------------')
         print('#%s: week %s, fold %s, score %.6f/%.6f, positives %s/%s' % (s, w, fold,
@@ -334,7 +334,7 @@ def public_train(data, weeks, kfold):
                 # cv_train_week = pre_cv_train_week
 
                 # pseudo label option1: sample from test data set
-                pl_sample_index, remained_index = pseudo_label_sampling(pre_cv_pred_week, pl_sampling_rate, 0.75, 0.25)
+                pl_sample_index, remained_index = pseudo_label_sampling(pre_cv_pred_week, pl_sampling_rate, 0.25, 0.25)
 
                 # pl_sample_index = data['test'].index[:int(pl_sampling_rate * len(data['test']))]
                 # remained_index = data['test'].index[int(pl_sampling_rate * len(data['test'])):]
@@ -370,7 +370,7 @@ def public_train(data, weeks, kfold):
 
                     # update pl_data
                     if(it < pl_sampling_times - 1):
-                        pl_sample_index, remained_index = pseudo_label_sampling(cv_pred_week, pl_sampling_rate, 0.75, 0.25)
+                        pl_sample_index, remained_index = pseudo_label_sampling(cv_pred_week, pl_sampling_rate, 0.25, 0.25)
                         pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop= True)
                         pl_data['label'] = np.array(proba2label(pre_cv_pred_week[pl_sample_index]))
 
@@ -378,7 +378,7 @@ def public_train(data, weeks, kfold):
             print('pseudo labeling with iterative mode, cv on train:')
             print(pl_iter_cv_train.tolist())
             print('pseudo labeling with iterative mode, positives on test:')
-            print(pl_iter_positives_pred)
+            print(pl_iter_positives_pred.tolist())
             print('==============================\n')
 
             # ## pseudo label option2
