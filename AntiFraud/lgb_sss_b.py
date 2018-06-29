@@ -1,7 +1,7 @@
 ########################################################################
 # Self-Training versioned Semi-supervised Learning with Segmented data #
 ########################################################################
-import sys, os, time, datetime
+import sys, os, time, datetime, psutil
 import numpy as np
 import pandas as pd
 import config
@@ -9,9 +9,14 @@ import utils
 from sklearn.model_selection import StratifiedKFold
 import lightgbm
 from sklearn.metrics import roc_auc_score
+import gc
 
 sys.path.append("..")
 pd.set_option('display.max_rows', None)
+process = psutil.Process(os.getpid())
+def _print_memory_usage():
+    ''''''
+    print('\n---- Current memory usage %sM ----\n' % int(process.memory_info().rss/(1024*1024)))
 
 num_iterations =  5000
 params = {
@@ -36,9 +41,9 @@ strategy = 'lgb_sss'
 debug = False
 pl_sampling_rate = 0.05
 pl_sample_weight = 0.01
-pl_sampling_times = 1
+pl_sampling_times = 3
 train_times = 16
-unlabeled_weight = 0.8
+unlabeled_weight = 0.9
 
 ## loading data
 cal_dtypes = {
@@ -271,6 +276,8 @@ def public_train(data, weeks, kfold):
                         pl_sample_index, remained_index = pseudo_label_sampling(cv_pred_week, pl_sampling_rate, 0.5, 0.5)
                         pl_data = data['test'][week_data.columns].iloc[pl_sample_index,].reset_index(drop= True)
                         pl_data['label'] = np.array(proba2label(pre_cv_pred_week[pl_sample_index]))
+            del post_week_data, post_test_data
+            gc.collect()
 
             print('\n==============================')
             print('pseudo labeling with iterative mode, cv on train:')
@@ -315,6 +322,11 @@ def public_train(data, weeks, kfold):
                                                                                                pre_test_positives, test_positives))
             print('time elapsed %s' % (int(w_end - w_start)))
             print('==========================================\n')
+
+            del week_data, pl_data, cv_train_week, pre_cv_train_week, cv_pred_week, pre_cv_pred_week
+            gc.collect()
+
+            _print_memory_usage()
         s_end = time.time()
         ## average cv_pred by weeks
         pre_cv_pred /= weeks
@@ -381,6 +393,7 @@ def public_train(data, weeks, kfold):
             pd.DataFrame({'id': data['test']['id'],
                           'date': data['test']['date'],
                           'score': pre_final_cv_pred / (s + 1.0)}).to_csv('%s/%s_pre_pred_%s.csv' % (OutputDir, strategy, pre_score_str), index=False, date_format='%Y%m%d')
+        _print_memory_usage()
 
     ## summary
     print('\n================ week cv&eval ===============')
@@ -412,6 +425,8 @@ def public_train(data, weeks, kfold):
 ## total weeks
 weeks = np.max(DataSet['train']['wno']) + 1
 print('Weeks %s' % weeks)
+
+_print_memory_usage()
 
 ## train and evaluate with local mode
 public_train(DataSet, weeks, 4)
