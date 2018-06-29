@@ -250,6 +250,8 @@ def public_train(data):
             dvalid = lightgbm.Dataset(valid_data[total_feat_cols], valid_data['label'], weight= w_valid, reference=dtrain, feature_name=total_feat_cols)
 
             bst = lightgbm.train(params, dtrain, num_iterations, valid_sets=dvalid, feval=evaltpr, verbose_eval=50,early_stopping_rounds=100)
+            del dtrain, dvalid
+            gc.collect()
 
             pre_cv_pred_test += bst.predict(data['test'][total_feat_cols], num_iteration=bst.best_iteration)
             pre_cv_pred_valid += bst.predict(valid_data[total_feat_cols], num_iteration=bst.best_iteration)
@@ -265,8 +267,12 @@ def public_train(data):
 
             dtrain = lightgbm.Dataset(post_train_data[total_feat_cols], post_train_data['label'], weight= post_w_train, feature_name=total_feat_cols)
             dvalid = lightgbm.Dataset(valid_data[total_feat_cols], valid_data['label'], weight= w_valid, reference=dtrain, feature_name=total_feat_cols)
+            del post_train_data
+            gc.collect()
 
             bst = lightgbm.train(params, dtrain, num_iterations, valid_sets=dvalid, feval=evaltpr, verbose_eval=50,early_stopping_rounds=100)
+            del dtrain, dvalid
+            gc.collect()
 
             cv_pred_test[remained_index] += bst.predict(data['test'][total_feat_cols].iloc[remained_index,], num_iteration=bst.best_iteration)
             cv_pred_test[pl_sample_index] += bst.predict(train_data[total_feat_cols][len(train_index):,], num_iteration= bst.best_iteration)
@@ -283,6 +289,8 @@ def public_train(data):
                                                                                    pre_cv_tpr_scores[s][w2], cv_tpr_scores[s][w2]))
             print('original positives %s, pl positives %s' % (np.sum(train_data['label']), np.sum(pl_data['label'])))
             print('------------------------------\n')
+
+            _print_memory_usage()
 
         pre_cv_pred_valid /= (wno2 - 1)
         pre_cv_pred_test /= (wno2 - 1)
@@ -320,6 +328,7 @@ def public_train(data):
         print('%s/%s' % (pre_pred_positives, pred_positives))
         print('===============================\n')
         ##
+        _print_memory_usage()
 
 _print_memory_usage()
 
