@@ -1,4 +1,4 @@
-import sys, os, time, datetime
+import sys, os, time, datetime, psutil
 import numpy as np
 import pandas as pd
 import config
@@ -7,9 +7,14 @@ from sklearn.model_selection import StratifiedKFold
 import lightgbm
 from sklearn.metrics import roc_auc_score
 from itertools import combinations
+import gc
 
 sys.path.append("..")
 pd.set_option('display.max_rows', None)
+process = psutil.Process(os.getpid())
+def _print_memory_usage():
+    ''''''
+    print('\n---- Current memory usage %sM ----\n' % int(process.memory_info().rss/(1024*1024)))
 
 num_iterations =  5000
 params = {
@@ -28,13 +33,13 @@ params = {
 
     'max_bin': 255,
 }
-strategy = 'lgb_sss'
+strategy = 'lgb_ts'
 debug = False
 pl_sampling_rate = 0.05
 pl_sample_weight = 0.01
 pl_sampling_times = 1
 train_times = 16
-unlabeled_weight = 0.8
+unlabeled_weight = 0.9
 
 ## loading data
 cal_dtypes = {
@@ -172,7 +177,7 @@ def pseudo_label_sampling(proba_array, sample_rate, pos_ratio, neg_ratio):
 
     return pl_sample_index, remained_index
 
-def public_train(data, weeks):
+def public_train(data):
     data['test']['label'] = 0
     wno2 = 4
 
@@ -315,3 +320,7 @@ def public_train(data, weeks):
         print('%s/%s' % (pre_pred_positives, pred_positives))
         print('===============================\n')
         ##
+
+_print_memory_usage()
+
+public_train(DataSet)
