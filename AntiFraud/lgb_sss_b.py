@@ -27,7 +27,7 @@ params = {
 
     #'num_iterations': 5000,
     'learning_rate': 0.01,  # !!!
-    'num_leaves': 63,
+    'num_leaves': 127,
     'max_depth': 8,  # !!!
     'scale_pos_weight': 1,
     'verbose': -10,
@@ -39,11 +39,11 @@ params = {
 }
 strategy = 'lgb_sss'
 debug = False
-pl_sampling_rate = 0.05
-pl_sample_weight = 0.01
-pl_sampling_times = 3
-train_times = 16
-unlabeled_weight = 0.9
+pl_sampling_rate = 0.1
+pl_sample_weight = 1.0
+pl_sampling_times = 1
+train_times = 24
+unlabeled_weight = 0.95
 
 ## loading data
 cal_dtypes = {
@@ -118,7 +118,28 @@ date_cols = [c for c in DataSet['train'].columns if(c.startswith('date_'))]
 # drop_cols = ["f24", "f26", "f27", "f28", "f29", "f30", "f31", "f34", "f52", "f53", "f54", "f58"]
 drop_cols = ["f34","f54","f58","f106","f81","f99","f28","f29","f30","f31","f24","f25","f26","f27","f21","f52","f53"]
 raw_cols = [c for c in raw_cols if(c not in drop_cols)]
-total_feat_cols = raw_cols
+
+##
+entire_data = pd.concat([DataSet['train'][raw_cols], DataSet['test'][raw_cols]], axis=0).reset_index(drop=True)
+total_size = len(entire_data)
+null_dict = {}
+for feat in raw_cols:
+    ratio = entire_data[feat].isnull().sum() / total_size
+    null_dict[feat] = ratio
+group_null_dict = {}
+for k in null_dict.keys():
+    if (null_dict[k] not in group_null_dict):
+        group_null_dict[null_dict[k]] = []
+    group_null_dict[null_dict[k]].append(k)
+sorted_group_null = sorted(group_null_dict.items(), key=lambda x: x[0], reverse=True)
+g_idx = 0
+for sgn in sorted_group_null:
+    DataSet['train']['group_null_%s' % g_idx] = DataSet['train'][sgn[1]].isnull().sum(axis= 1)
+    DataSet['test']['group_null_%s' % g_idx] = DataSet['test'][sgn[1]].isnull().sum(axis= 1)
+    g_idx += 1
+
+group_null_cols = [c for c in DataSet['train'].columns if(c.startswith('group_null'))]
+total_feat_cols = raw_cols + ['num_missing_feat'] + group_null_cols
 
 def evalauc(preds, dtrain):
     labels = dtrain.get_label()
