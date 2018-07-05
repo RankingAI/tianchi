@@ -126,6 +126,8 @@ null_dict = {}
 for feat in raw_cols:
     ratio = entire_data[feat].isnull().sum() / total_size
     null_dict[feat] = ratio
+del entire_data
+gc.collect()
 group_null_dict = {}
 for k in null_dict.keys():
     if (null_dict[k] not in group_null_dict):
@@ -139,7 +141,9 @@ for sgn in sorted_group_null:
     g_idx += 1
 
 group_null_cols = [c for c in DataSet['train'].columns if(c.startswith('group_null'))]
-total_feat_cols = raw_cols + ['num_missing_feat'] + group_null_cols
+total_feat_cols = raw_cols + ['num_missing_feat', 'date_is_holiday'] + group_null_cols
+
+print(DataSet['train'][group_null_cols].head())
 
 def evalauc(preds, dtrain):
     labels = dtrain.get_label()
@@ -195,8 +199,10 @@ def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w, weights):
 def pseudo_label_sampling(proba_array, sample_rate, pos_ratio, neg_ratio):
     sorted_preds = np.sort(proba_array, axis=None)
     down_thre, up_thre = sorted_preds[:int(0.983 * sample_rate * neg_ratio * len(sorted_preds))][-1], sorted_preds[-int(0.012 * sample_rate * pos_ratio * len(sorted_preds)):][0]
-    pl_sample_index = np.where((proba_array >= up_thre) | (proba_array <= down_thre))[0]
-    remained_index = np.where((proba_array < up_thre) & (proba_array > down_thre))[0]
+    #pl_sample_index = np.where((proba_array >= up_thre) | (proba_array <= down_thre))[0]
+    #remained_index = np.where((proba_array < up_thre) & (proba_array > down_thre))[0]
+    pl_sample_index = np.where((proba_array >= up_thre))
+    remained_index = np.where((proba_array < up_thre))[0]
 
     print(down_thre, up_thre)
 
