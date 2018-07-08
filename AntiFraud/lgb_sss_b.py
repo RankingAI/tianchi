@@ -35,6 +35,8 @@ params = {
     'feature_fraction': 0.6,
     'bagging_fraction': 0.9,
 
+    'num_threads': -1,
+
     'max_bin': 255,
 }
 strategy = 'lgb_sss'
@@ -42,7 +44,7 @@ debug = False
 pl_sampling_rate = 0.1
 pl_sample_weight = 1.0
 pl_sampling_times = 1
-train_times = 24
+train_times = 32
 unlabeled_weight = 0.95
 
 ## loading data
@@ -141,7 +143,7 @@ for sgn in sorted_group_null:
     g_idx += 1
 
 group_null_cols = [c for c in DataSet['train'].columns if(c.startswith('group_null'))]
-total_feat_cols = raw_cols + ['num_missing_feat', 'date_is_holiday'] + group_null_cols
+total_feat_cols = raw_cols + ['num_missing_feat'] + group_null_cols
 
 print(DataSet['train'][group_null_cols].head())
 
@@ -199,10 +201,10 @@ def train_with_cv(train_data, test_data, kfold, skf, cv_params, s, w, weights):
 def pseudo_label_sampling(proba_array, sample_rate, pos_ratio, neg_ratio):
     sorted_preds = np.sort(proba_array, axis=None)
     down_thre, up_thre = sorted_preds[:int(0.983 * sample_rate * neg_ratio * len(sorted_preds))][-1], sorted_preds[-int(0.012 * sample_rate * pos_ratio * len(sorted_preds)):][0]
-    #pl_sample_index = np.where((proba_array >= up_thre) | (proba_array <= down_thre))[0]
-    #remained_index = np.where((proba_array < up_thre) & (proba_array > down_thre))[0]
-    pl_sample_index = np.where((proba_array >= up_thre))
-    remained_index = np.where((proba_array < up_thre))[0]
+    pl_sample_index = np.where((proba_array >= up_thre) | (proba_array <= down_thre))[0]
+    remained_index = np.where((proba_array < up_thre) & (proba_array > down_thre))[0]
+    #pl_sample_index = np.where((proba_array >= up_thre))[0]
+    #remained_index = np.where((proba_array < up_thre))[0]
 
     print(down_thre, up_thre)
 
